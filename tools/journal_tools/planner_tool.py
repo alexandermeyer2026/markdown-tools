@@ -133,6 +133,27 @@ class PlannerTool:
 
         prefix = f'\x1b[7m>{PlannerTool.RESET} ' if is_selected else '  '
         return prefix + line
+    @staticmethod
+    def _icon_col(task: Task, step_size_hours: float, first_slot: int) -> int:
+        if not task.time:
+            return 2  # '  ' prefix
+        start_m = PlannerTool.get_minutes(task.time.start)
+        start_slot = PlannerTool.get_time_slot(start_m, step_size_hours)
+        end_slot = start_slot
+        if task.time.end:
+            end_slot = PlannerTool.get_time_slot(PlannerTool.get_minutes(task.time.end) - 1, step_size_hours)
+        bar_width = max(end_slot - start_slot + 1, 1)
+        return 2 + (start_slot - first_slot) + bar_width + 1 + len(task.time.to_str()) + 1
+
+    @staticmethod
+    def _subtask_rows(task: Task, left_pad: int = 0, depth: int = 1) -> list[str]:
+        rows = []
+        for child in task.children:
+            indent = ' ' * left_pad + '  ' * depth
+            icon = PlannerTool.STATUS_ICONS.get(child.status, '?')
+            rows.append(f"{indent}{PlannerTool.GRAY}{icon} {child.title}{PlannerTool.RESET}")
+            rows.extend(PlannerTool._subtask_rows(child, left_pad, depth + 1))
+        return rows
 
     @staticmethod
     def render(file_path, timed_tasks, untimed_tasks, cursor_idx,
@@ -160,6 +181,8 @@ class PlannerTool:
 
             for i, task in enumerate(timed_tasks):
                 print(PlannerTool._task_row(task, step_size_hours, first_slot, cursor_idx == i))
+                for row in PlannerTool._subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, first_slot)):
+                    print(row)
         else:
             print(f"  {PlannerTool.GRAY}No timed tasks yet{PlannerTool.RESET}")
 
@@ -167,6 +190,8 @@ class PlannerTool:
             print(f"\n  {PlannerTool.GRAY}── Unscheduled {'─' * 50}{PlannerTool.RESET}")
             for j, task in enumerate(untimed_tasks):
                 print(PlannerTool._task_row(task, step_size_hours, 0, cursor_idx == len(timed_tasks) + j))
+                for row in PlannerTool._subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, 0)):
+                    print(row)
 
         if not all_tasks:
             print(f"\n  {PlannerTool.GRAY}No tasks. Press n to add one.{PlannerTool.RESET}")
@@ -216,9 +241,9 @@ class PlannerTool:
         step  = PlannerTool.STEP_SIZE_HOURS
         step_m = int(step * 60)
 
-        timed_tasks   = sorted([t for t in tasks if t.time],
+        timed_tasks   = sorted([t for t in tasks if t.time and t.parent is None],
                                key=lambda t: PlannerTool.get_minutes(t.time.start))
-        untimed_tasks = [t for t in tasks if not t.time]
+        untimed_tasks = [t for t in tasks if not t.time and t.parent is None]
         new_tasks     = []
 
         original_lines = {t.line_number: t.to_line() for t in tasks if t.line_number > 0}
