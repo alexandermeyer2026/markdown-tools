@@ -7,7 +7,7 @@ from os_utils import FileFinder
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RESET,
-    get_minutes, get_time_slot, scale_lines,
+    ansi_truncate_pad, get_minutes, get_time_slot, scale_lines,
 )
 
 RED   = '\x1b[31m'
@@ -59,11 +59,7 @@ class UpdateTool:
 
         blocks = []
         blocks.append(UpdateTool._header_and_calendar(today, now))
-        if overdue:
-            blocks.append(UpdateTool._section_overdue(overdue))
-        blocks.append(UpdateTool._section_today(today, now, today_tasks))
-        if upcoming:
-            blocks.append(UpdateTool._section_upcoming(today, upcoming))
+        blocks.append(UpdateTool._three_columns(today, now, overdue, today_tasks, upcoming))
 
         print('\n\n'.join('\n'.join(b) for b in blocks))
 
@@ -90,10 +86,9 @@ class UpdateTool:
         return shutil.get_terminal_size(fallback=(80, 24)).columns
 
     @staticmethod
-    def _divider(label):
-        cols = UpdateTool._cols()
-        bar_len = max(0, cols - len(label) - 7)
-        return f"  {GRAY}──{RESET} {BOLD}{label}{RESET} {GRAY}{'─' * bar_len}{RESET}"
+    def _col_divider(label, width):
+        bar_len = max(0, width - len(label) - 5)
+        return f"{GRAY}──{RESET} {BOLD}{label}{RESET} {GRAY}{'─' * bar_len}{RESET}"
 
     # ── Header + Calendar ─────────────────────────────────────────────────────
 
@@ -157,50 +152,47 @@ class UpdateTool:
             result.append(c + gap + cal)
         return result
 
-    # ── Overdue ───────────────────────────────────────────────────────────────
+    # ── Three-column layout ───────────────────────────────────────────────────
 
     @staticmethod
-    def _section_overdue(overdue):
-        label = f"{'1 overdue task' if len(overdue) == 1 else f'{len(overdue)} overdue tasks'}"
-        lines = [UpdateTool._divider(label)]
-        for date, task in overdue:
-            icon  = STATUS_ICONS.get(task.status, '○')
-            date_label = date.strftime('%a %-d %b')
-            lines.append(f"  {RED}{icon}{RESET}  {GRAY}{date_label:<11}{RESET}  {task.title}")
+    def _col_overdue(overdue, col_w):
+        n     = len(overdue)
+        label = f"Overdue{'  ·  ' + str(n) if n else ''}"
+        pad   = lambda s: ansi_truncate_pad(s, col_w)
+        lines = [pad(UpdateTool._col_divider(label, col_w))]
+        if not overdue:
+            lines.append(pad(f"  {GRAY}–{RESET}"))
+        else:
+            for date, task in overdue:
+                icon = STATUS_ICONS.get(task.status, '○')
+                lines.append(pad(
+                    f"  {RED}{icon}{RESET}  {GRAY}{date.strftime('%a %-d %b')}{RESET}  {task.title}"
+                ))
         return lines
 
-    # ── Today ─────────────────────────────────────────────────────────────────
-
     @staticmethod
-    def _section_today(today, now, all_tasks):
-        timed   = sorted(
-            [t for t in all_tasks if t.time and t.parent is None],
-            key=lambda t: get_minutes(t.time.start),
-        )
+    def _col_today(today, now, all_tasks, col_w):
+        timed   = sorted([t for t in all_tasks if t.time and t.parent is None],
+                         key=lambda t: get_minutes(t.time.start))
         untimed = [t for t in all_tasks if not t.time and t.parent is None]
-
-        total = len(timed) + len(untimed)
-        done  = sum(1 for t in timed + untimed if t.status == 'done')
+        total   = len(timed) + len(untimed)
+        done    = sum(1 for t in timed + untimed if t.status == 'done')
 
         now_m     = now.hour * 60 + now.minute
         next_task = next(
-            (t for t in timed if get_minutes(t.time.start) > now_m and t.status != 'done'),
-            None,
+            (t for t in timed if get_minutes(t.time.start) > now_m and t.status != 'done'), None
         )
-
-        summary_parts = [f"{total} task{'s' if total != 1 else ''}"]
-        if total:
-            summary_parts.append(f"{done} ✓")
+        summary = [f"{total} task{'s' if total != 1 else ''}", f"{done} ✓"]
         if next_task:
             delta = get_minutes(next_task.time.start) - now_m
             h, m  = divmod(delta, 60)
-            eta   = f"{h}h {m}m" if h else f"{m}m"
-            summary_parts.append(f"next in {eta}")
+            summary.append(f"next in {f'{h}h {m}m' if h else f'{m}m'}")
 
-        lines = [UpdateTool._divider('Today  ·  ' + '  ·  '.join(summary_parts))]
+        pad   = lambda s: ansi_truncate_pad(s, col_w)
+        lines = [pad(UpdateTool._col_divider('Today  ·  ' + '  ·  '.join(summary), col_w))]
 
         if not timed and not untimed:
-            lines.append(f"  {GRAY}No tasks today{RESET}")
+            lines.append(pad(f"  {GRAY}No tasks today{RESET}"))
             return lines
 
         if timed:
@@ -208,27 +200,44 @@ class UpdateTool:
             first_slot = get_time_slot(get_minutes(timed[0].time.start), step)
             now_slot   = get_time_slot(now_m, step)
             hours_line, scale_line = scale_lines(step, first_slot, now_slot)
-            lines.append('  ' + hours_line)
-            lines.append('  ' + scale_line)
+            lines.append(pad('  ' + hours_line))
+            lines.append(pad('  ' + scale_line))
             for task in timed:
-                lines.append('  ' + UpdateTool._task_bar(task, step, first_slot))
+                lines.append(pad('  ' + UpdateTool._task_bar(task, step, first_slot)))
 
-        if untimed:
-            if timed:
-                lines.append('')
-            for task in untimed:
-                icon  = STATUS_ICONS.get(task.status, '○')
-                color = STATUS_COLORS.get(task.status, GRAY)
-                lines.append(f"  {color}{icon}{RESET}  {task.title}")
+        if timed and untimed:
+            lines.append(' ' * col_w)
+        for task in untimed:
+            icon  = STATUS_ICONS.get(task.status, '○')
+            color = STATUS_COLORS.get(task.status, GRAY)
+            lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
 
+        return lines
+
+    @staticmethod
+    def _col_upcoming(today, upcoming_by_date, col_w):
+        pad   = lambda s: ansi_truncate_pad(s, col_w)
+        lines = [pad(UpdateTool._col_divider('Upcoming', col_w))]
+        if not upcoming_by_date:
+            lines.append(pad(f"  {GRAY}–{RESET}"))
+            return lines
+        for date in sorted(upcoming_by_date):
+            tasks = upcoming_by_date[date]
+            delta = (date - today).days
+            label = f"Tomorrow, {date.strftime('%-d %b')}" if delta == 1 else date.strftime('%A, %-d %b')
+            lines.append(pad(f"  {BOLD}{label}{RESET}"))
+            for task in tasks:
+                icon        = STATUS_ICONS.get(task.status, '○')
+                color       = STATUS_COLORS.get(task.status, GRAY)
+                time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
+                lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
         return lines
 
     @staticmethod
     def _task_bar(task, step, first_slot):
         color      = STATUS_COLORS.get(task.status, GRAY)
         icon       = STATUS_ICONS.get(task.status, '○')
-        start_m    = get_minutes(task.time.start)
-        start_slot = get_time_slot(start_m, step)
+        start_slot = get_time_slot(get_minutes(task.time.start), step)
         end_slot   = start_slot
         if task.time.end:
             end_slot = get_time_slot(get_minutes(task.time.end) - 1, step)
@@ -236,22 +245,19 @@ class UpdateTool:
         offset = start_slot - first_slot
         return ' ' * offset + bar + f"  {color}{icon}{RESET}  {task.time.to_str()}  {BOLD}{task.title}{RESET}"
 
-    # ── Upcoming ──────────────────────────────────────────────────────────────
-
     @staticmethod
-    def _section_upcoming(today, upcoming_by_date):
-        lines = [UpdateTool._divider('Upcoming')]
-        for date in sorted(upcoming_by_date):
-            tasks = upcoming_by_date[date]
-            delta = (date - today).days
-            if delta == 1:
-                label = f"Tomorrow, {date.strftime('%-d %b')}"
-            else:
-                label = date.strftime('%A, %-d %b')
-            lines.append(f"  {BOLD}{label}{RESET}")
-            for task in tasks:
-                icon        = STATUS_ICONS.get(task.status, '○')
-                color       = STATUS_COLORS.get(task.status, GRAY)
-                time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
-                lines.append(f"  {color}{icon}{RESET}  {time_prefix}{task.title}")
-        return lines
+    def _three_columns(today, now, overdue, today_tasks, upcoming_by_date):
+        sep   = '  │  '
+        col_w = max(10, (UpdateTool._cols() - len(sep) * 2) // 3)
+
+        c1 = UpdateTool._col_overdue(overdue, col_w)
+        c2 = UpdateTool._col_today(today, now, today_tasks, col_w)
+        c3 = UpdateTool._col_upcoming(today, upcoming_by_date, col_w)
+
+        height = max(len(c1), len(c2), len(c3))
+        empty  = ' ' * col_w
+        c1 += [empty] * (height - len(c1))
+        c2 += [empty] * (height - len(c2))
+        c3 += [empty] * (height - len(c3))
+
+        return [a + sep + b + sep + c for a, b, c in zip(c1, c2, c3)]
