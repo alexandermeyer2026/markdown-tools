@@ -7,7 +7,7 @@ import termios
 import tty
 
 from models import Task, TaskTime
-from os_utils import BackupManager, FileFinder
+from os_utils import BackupManager, FileFinder, FileWriter
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RESET,
@@ -171,16 +171,22 @@ class PlannerTool:
         monday = today - datetime.timedelta(days=today.weekday())
         week_days = [monday + datetime.timedelta(days=i) for i in range(7)]
 
+        file_paths = []
         week_tasks = []
+        all_tasks_per_day = []
         for day in week_days:
             files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
             if files:
                 all_tasks = TaskParser.parse_file(files[0])
+                file_paths.append(files[0])
+                all_tasks_per_day.append(all_tasks)
                 week_tasks.append([t for t in all_tasks if t.parent is None])
             else:
+                file_paths.append(None)
+                all_tasks_per_day.append([])
                 week_tasks.append([])
 
-        PlannerTool.interactive_week(week_days, week_tasks)
+        PlannerTool.interactive_week(week_days, week_tasks, file_paths, all_tasks_per_day, directory)
 
     @staticmethod
     def _week_cell(title: str, col_width: int, is_selected: bool) -> str:
@@ -234,17 +240,72 @@ class PlannerTool:
         sys.stdout.flush()
 
     @staticmethod
-    def interactive_week(week_days: list, week_tasks: list):
+    def _move_task_week(week_tasks, src_col, dst_col, cursor_row) -> int:
+        if not week_tasks[src_col] or not (0 <= cursor_row < len(week_tasks[src_col])):
+            return cursor_row
+        task = week_tasks[src_col].pop(cursor_row)
+        week_tasks[dst_col].append(task)
+        return len(week_tasks[dst_col]) - 1
+
+    @staticmethod
+    def _save_week(week_tasks, original_tasks_by_col, file_paths, all_tasks_per_day, week_days, directory):
+        backed_up = set()
+        for src_col in range(7):
+            src_path = file_paths[src_col]
+            if not src_path:
+                continue
+            current_ids = {id(t) for t in week_tasks[src_col]}
+            departed = [
+                (t, next((c for c, col in enumerate(week_tasks) if t in col), None))
+                for t in original_tasks_by_col[src_col]
+                if id(t) not in current_ids
+            ]
+            departed = [(t, dst) for t, dst in departed if dst is not None]
+            if not departed:
+                continue
+            if src_path not in backed_up:
+                BackupManager.backup(src_path, directory)
+                backed_up.add(src_path)
+            # Reverse line order: cutting from the bottom leaves earlier line numbers intact,
+            # so each subsequent cut uses the original line numbers without re-parsing.
+            departed.sort(key=lambda x: x[0].line_number, reverse=True)
+            for task, dst_col in departed:
+                if file_paths[dst_col] is None:
+                    new_path = os.path.join(directory, week_days[dst_col].strftime('%Y-%m-%d.md'))
+                    open(new_path, 'w').close()
+                    file_paths[dst_col] = new_path
+                dst_path = file_paths[dst_col]
+                if dst_path not in backed_up:
+                    BackupManager.backup(dst_path, directory)
+                    backed_up.add(dst_path)
+                block = FileWriter.cut_task(src_path, task, all_tasks_per_day[src_col])
+                FileWriter.paste_task(dst_path, block)
+
+    @staticmethod
+    def interactive_week(
+        week_days: list, week_tasks: list,
+        file_paths: list, all_tasks_per_day: list, directory: str,
+    ):
         cursor_col = next((i for i, t in enumerate(week_tasks) if t), 0)
         cursor_row = 0
+        has_changes = False
+        original_tasks_by_col = [list(col) for col in week_tasks]
 
         while True:
             PlannerTool.render_week(week_days, week_tasks, cursor_col, cursor_row)
             key = PlannerTool.read_key()
 
             if key in ('q', '\x03'):
-                sys.stdout.write('\x1b[2J\x1b[H')
-                sys.stdout.flush()
+                if has_changes:
+                    sys.stdout.write('\x1b[2J\x1b[H')
+                    sys.stdout.flush()
+                    confirm = input("Save changes? [y/n]: ").strip().lower()
+                    if confirm == 'y':
+                        PlannerTool._save_week(
+                            week_tasks, original_tasks_by_col,
+                            file_paths, all_tasks_per_day, week_days, directory,
+                        )
+                        print("✓ Changes saved")
                 break
 
             elif key == 'j':
@@ -265,19 +326,15 @@ class PlannerTool:
                 cursor_col = new_col
                 cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
 
-            elif key == 'H':
-                if cursor_col > 0 and week_tasks[cursor_col]:
-                    task = week_tasks[cursor_col].pop(cursor_row)
-                    cursor_col -= 1
-                    week_tasks[cursor_col].append(task)
-                    cursor_row = len(week_tasks[cursor_col]) - 1
+            elif key == 'H' and cursor_col > 0 and week_tasks[cursor_col]:
+                cursor_row = PlannerTool._move_task_week(week_tasks, cursor_col, cursor_col - 1, cursor_row)
+                cursor_col -= 1
+                has_changes = True
 
-            elif key == 'L':
-                if cursor_col < 6 and week_tasks[cursor_col]:
-                    task = week_tasks[cursor_col].pop(cursor_row)
-                    cursor_col += 1
-                    week_tasks[cursor_col].append(task)
-                    cursor_row = len(week_tasks[cursor_col]) - 1
+            elif key == 'L' and cursor_col < 6 and week_tasks[cursor_col]:
+                cursor_row = PlannerTool._move_task_week(week_tasks, cursor_col, cursor_col + 1, cursor_row)
+                cursor_col += 1
+                has_changes = True
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
