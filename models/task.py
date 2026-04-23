@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -20,6 +22,9 @@ class Task:
     time: Optional[TaskTime]
     line_number: int
     indent: str = ''
+    body: Optional[str] = None
+    parent: Optional[Task] = field(default=None, compare=False, repr=False)
+    children: list[Task] = field(default_factory=list, compare=False, repr=False)
 
     STATUS_CHAR = {
         'todo': ' ',
