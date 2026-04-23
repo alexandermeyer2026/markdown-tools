@@ -41,6 +41,8 @@ class PlannerTool:
             date = datetime.date.today() + datetime.timedelta(days=1)
         elif basename.lower() == 'yesterday':
             date = datetime.date.today() - datetime.timedelta(days=1)
+        elif re.fullmatch(r'\d{4}-\d{2}-\d{2}', basename):
+            date = datetime.datetime.strptime(basename, '%Y-%m-%d').date()
         else:
             date = FileFinder.get_journal_file_date(input_arg)
 
