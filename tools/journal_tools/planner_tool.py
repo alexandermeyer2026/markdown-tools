@@ -250,6 +250,7 @@ class PlannerTool:
     @staticmethod
     def _save_week(week_tasks, original_tasks_by_col, file_paths, all_tasks_per_day, week_days, directory):
         backed_up = set()
+        dst_paths_written = set()
         for src_col in range(7):
             src_path = file_paths[src_col]
             if not src_path:
@@ -280,6 +281,12 @@ class PlannerTool:
                     backed_up.add(dst_path)
                 block = FileWriter.cut_task(src_path, task, all_tasks_per_day[src_col])
                 FileWriter.paste_task(dst_path, block)
+                dst_paths_written.add(dst_path)
+
+        for path in dst_paths_written:
+            all_tasks = TaskParser.parse_file(path)
+            timed = [t for t in all_tasks if t.time is not None and t.parent is None]
+            FileWriter.sort_timed_tasks(path, timed, all_tasks)
 
     @staticmethod
     def interactive_week(
@@ -371,6 +378,10 @@ class PlannerTool:
             if os.path.exists(tmp):
                 os.remove(tmp)
             raise
+
+        all_tasks = TaskParser.parse_file(file_path)
+        timed = [t for t in all_tasks if t.time is not None and t.parent is None]
+        FileWriter.sort_timed_tasks(file_path, timed, all_tasks)
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
