@@ -22,7 +22,11 @@ class PlannerTool:
     @staticmethod
     def run(args, directory='.'):
         if not args:
-            print("Usage: journal planner <today|yesterday|tomorrow|YYYY-MM-DD|file>")
+            print("Usage: journal planner <today|yesterday|tomorrow|YYYY-MM-DD|week|file>")
+            return
+
+        if args[0].lower() == 'week':
+            PlannerTool.run_week(directory)
             return
 
         input_arg = args[0]
@@ -156,6 +160,124 @@ class PlannerTool:
         padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
         sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
         sys.stdout.flush()
+
+    # ── Week planner ──────────────────────────────────────────────────────────
+
+    DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+    @staticmethod
+    def run_week(directory='.'):
+        today = datetime.date.today()
+        monday = today - datetime.timedelta(days=today.weekday())
+        week_days = [monday + datetime.timedelta(days=i) for i in range(7)]
+
+        week_tasks = []
+        for day in week_days:
+            files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
+            if files:
+                all_tasks = TaskParser.parse_file(files[0])
+                week_tasks.append([t for t in all_tasks if t.parent is None])
+            else:
+                week_tasks.append([])
+
+        PlannerTool.interactive_week(week_days, week_tasks)
+
+    @staticmethod
+    def _week_cell(title: str, col_width: int, is_selected: bool) -> str:
+        prefix = '> ' if is_selected else '  '
+        text = prefix + title
+        if len(text) > col_width:
+            text = text[:col_width - 3] + '...'
+        else:
+            text = text.ljust(col_width)
+        return f'\x1b[7m{text}{RESET}' if is_selected else text
+
+    @staticmethod
+    def render_week(week_days: list, week_tasks: list, cursor_col: int, cursor_row: int):
+        cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+        col_width = max((cols - 2) // 7, 10)
+        margin = '  '
+        today = datetime.date.today()
+
+        lines = []
+        monday, sunday = week_days[0], week_days[-1]
+        lines.append(f"{margin}{BOLD}Week {monday.strftime('%b %d')} – {sunday.strftime('%b %d, %Y')}{RESET}\n")
+
+        # Day headers
+        header = margin
+        for i, day in enumerate(week_days):
+            label = f"{PlannerTool.DAY_NAMES[i]} {day.strftime('%m/%d')}"
+            padded = label.ljust(col_width)
+            header += f"{BOLD}{padded}{RESET}" if day == today else padded
+        lines.append(header)
+        lines.append(margin + ('─' * (col_width - 1) + ' ') * 7)
+
+        # Task rows — at least 1 row so the cursor is always visible
+        max_rows = max(max((len(t) for t in week_tasks), default=0), 1)
+        for row in range(max_rows):
+            line = margin
+            for col_idx in range(7):
+                tasks = week_tasks[col_idx]
+                is_selected = (col_idx == cursor_col and row == cursor_row)
+                if row < len(tasks):
+                    line += PlannerTool._week_cell(tasks[row].title, col_width, is_selected)
+                elif is_selected:
+                    line += PlannerTool._week_cell('', col_width, True)
+                else:
+                    line += ' ' * col_width
+            lines.append(line)
+
+        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task left/right  [q] quit{RESET}")
+
+        padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
+        sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
+        sys.stdout.flush()
+
+    @staticmethod
+    def interactive_week(week_days: list, week_tasks: list):
+        cursor_col = next((i for i, t in enumerate(week_tasks) if t), 0)
+        cursor_row = 0
+
+        while True:
+            PlannerTool.render_week(week_days, week_tasks, cursor_col, cursor_row)
+            key = PlannerTool.read_key()
+
+            if key in ('q', '\x03'):
+                sys.stdout.write('\x1b[2J\x1b[H')
+                sys.stdout.flush()
+                break
+
+            elif key == 'j':
+                tasks = week_tasks[cursor_col]
+                if tasks:
+                    cursor_row = min(cursor_row + 1, len(tasks) - 1)
+
+            elif key == 'k':
+                cursor_row = max(cursor_row - 1, 0)
+
+            elif key == 'h':
+                new_col = max(cursor_col - 1, 0)
+                cursor_col = new_col
+                cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
+
+            elif key == 'l':
+                new_col = min(cursor_col + 1, 6)
+                cursor_col = new_col
+                cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
+
+            elif key == 'H':
+                if cursor_col > 0 and week_tasks[cursor_col]:
+                    task = week_tasks[cursor_col].pop(cursor_row)
+                    cursor_col -= 1
+                    week_tasks[cursor_col].append(task)
+                    cursor_row = len(week_tasks[cursor_col]) - 1
+
+            elif key == 'L':
+                if cursor_col < 6 and week_tasks[cursor_col]:
+                    task = week_tasks[cursor_col].pop(cursor_row)
+                    cursor_col += 1
+                    week_tasks[cursor_col].append(task)
+                    cursor_row = len(week_tasks[cursor_col]) - 1
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
