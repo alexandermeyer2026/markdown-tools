@@ -163,12 +163,11 @@ class PlannerTool:
     @staticmethod
     def render(file_path, timed_tasks, untimed_tasks, cursor_idx,
                step_size_hours, directory, has_changes, date):
-        sys.stdout.write('\x1b[2J\x1b[H')
-        sys.stdout.flush()
+        lines = []
 
         rel_path = os.path.relpath(file_path, directory)
         marker = ' *' if has_changes else ''
-        print(f"  {PlannerTool.BOLD}Planning: {rel_path}{marker}{PlannerTool.RESET}\n")
+        lines.append(f"  {PlannerTool.BOLD}Planning: {rel_path}{marker}{PlannerTool.RESET}\n")
 
         all_tasks = timed_tasks + untimed_tasks
 
@@ -181,27 +180,47 @@ class PlannerTool:
                 now_slot = PlannerTool.get_time_slot(now_m, step_size_hours)
 
             hours_line, scale_line = PlannerTool._scale_lines(step_size_hours, first_slot, now_slot)
-            print('  ' + hours_line)
-            print('  ' + scale_line)
+            lines.append('  ' + hours_line)
+            lines.append('  ' + scale_line)
 
             for i, task in enumerate(timed_tasks):
-                print(PlannerTool._task_row(task, step_size_hours, first_slot, cursor_idx == i))
-                for row in PlannerTool._subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, first_slot)):
-                    print(row)
+                lines.append(PlannerTool._task_row(task, step_size_hours, first_slot, cursor_idx == i))
+                lines.extend(PlannerTool._subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, first_slot)))
         else:
-            print(f"  {PlannerTool.GRAY}No timed tasks yet{PlannerTool.RESET}")
+            lines.append(f"  {PlannerTool.GRAY}No timed tasks yet{PlannerTool.RESET}")
 
         if untimed_tasks:
-            print(f"\n  {PlannerTool.GRAY}── Unscheduled {'─' * 50}{PlannerTool.RESET}")
+            lines.append(f"\n  {PlannerTool.GRAY}── Unscheduled {'─' * 50}{PlannerTool.RESET}")
             for j, task in enumerate(untimed_tasks):
-                print(PlannerTool._task_row(task, step_size_hours, 0, cursor_idx == len(timed_tasks) + j))
-                for row in PlannerTool._subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, 0)):
-                    print(row)
+                lines.append(PlannerTool._task_row(task, step_size_hours, 0, cursor_idx == len(timed_tasks) + j))
+                lines.extend(PlannerTool._subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, 0)))
 
         if not all_tasks:
-            print(f"\n  {PlannerTool.GRAY}No tasks. Press n to add one.{PlannerTool.RESET}")
+            lines.append(f"\n  {PlannerTool.GRAY}No tasks. Press n to add one.{PlannerTool.RESET}")
 
-        print(f"\n  {PlannerTool.GRAY}[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  [n] new  [q] quit{PlannerTool.RESET}")
+        lines.append(f"\n  {PlannerTool.GRAY}[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  [n] new  [q] quit{PlannerTool.RESET}")
+
+        cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+        ansi_re = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+        padded = []
+        for line in '\n'.join(lines).split('\n'):
+            out, visible = [], 0
+            i = 0
+            while i < len(line):
+                m = ansi_re.match(line, i)
+                if m:
+                    out.append(m.group())
+                    i = m.end()
+                elif visible < cols:
+                    out.append(line[i])
+                    visible += 1
+                    i += 1
+                else:
+                    break
+            out.append(PlannerTool.RESET + ' ' * (cols - visible))
+            padded.append(''.join(out))
+        sys.stdout.write('\x1b[H' + '\n'.join(padded) + '\x1b[J')
+        sys.stdout.flush()
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
