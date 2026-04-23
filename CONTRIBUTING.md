@@ -7,7 +7,7 @@ Thanks for your interest in contributing to Markdown Tools!
 1. Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/githubuser11000/markdown-tools.git
+git clone https://github.com/alexandermeyer2026/markdown-tools.git
 cd markdown-tools
 poetry install
 ```
@@ -26,7 +26,7 @@ poetry run pytest
 
 ## Adding a New Tool
 
-Tools live in `tools/` or in a module-specific subdirectory (e.g. `journal/tools/`). Each tool should:
+Tools live in `tools/` or in a module-specific subdirectory (e.g. `tools/journal_tools/`). Each tool should:
 
 - Be self-contained and focused on a single task
 - Accept its inputs via the CLI in `main.py`

@@ -3,7 +3,7 @@ name = "markdown-tools"
 version = "0.1.0"
 description = "A modular toolset for managing knowledge and tasks in markdown files"
 authors = [
-    {name = "githubuser11000",email = "153731316+githubuser11000@users.noreply.github.com"}
+    {name = "Alexander Meyer"}
 ]
 requires-python = "^3.10"
 dependencies = [
