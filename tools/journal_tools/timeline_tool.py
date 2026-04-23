@@ -10,6 +10,10 @@ from parser import TaskParser
 
 
 class TimelineTool:
+    STATUS_ICONS = {'todo': '○', 'in progress': '◐', 'done': '✓', 'failed': '✗', 'started': '~'}
+    GRAY  = '\x1b[90m'
+    RESET = '\x1b[0m'
+
     @staticmethod
     def run(args, directory='.'):
         if not args:
@@ -137,10 +141,31 @@ class TimelineTool:
         return line
 
     @staticmethod
+    def _icon_col(task: Task, step_size_hours: float, first_task_slot: int) -> int:
+        start_slot = TimelineTool.get_time_slot(TimelineTool.get_minutes(task.time.start), step_size_hours)
+        end_slot = start_slot
+        if task.time.end:
+            end_slot = TimelineTool.get_time_slot(TimelineTool.get_minutes(task.time.end) - 1, step_size_hours)
+        bar_width = max(end_slot - start_slot + 1, 1)
+        return (start_slot - first_task_slot) + bar_width + 1
+
+    @staticmethod
+    def _subtask_rows(task: Task, left_pad: int = 0, depth: int = 1) -> list[str]:
+        rows = []
+        for child in task.children:
+            indent = ' ' * left_pad + '  ' * depth
+            icon = TimelineTool.STATUS_ICONS.get(child.status, '?')
+            rows.append(f"{indent}{TimelineTool.GRAY}{icon} {child.title}{TimelineTool.RESET}")
+            rows.extend(TimelineTool._subtask_rows(child, left_pad, depth + 1))
+        return rows
+
+    @staticmethod
     def render_tasks(timed_tasks: list[Task], step_size_hours: float, terminal_width: int, first_task_slot: int, now_marker_slot: int) -> None:
         for task in timed_tasks:
             line = TimelineTool.render_task(task, step_size_hours, terminal_width, first_task_slot, now_marker_slot)
             print(line)
+            for row in TimelineTool._subtask_rows(task, left_pad=TimelineTool._icon_col(task, step_size_hours, first_task_slot)):
+                print(row)
 
     @staticmethod
     def render_timeline(tasks: list[Task], date: datetime.date, step_size_hours: float = 1) -> None:
@@ -152,7 +177,7 @@ class TimelineTool:
         except (OSError, AttributeError):
             terminal_width = 80
 
-        timed_tasks = [x for x in tasks if x.time and x.time.start]
+        timed_tasks = [x for x in tasks if x.time and x.time.start and x.parent is None]
         timed_tasks.sort(key=lambda x: TimelineTool.get_minutes(x.time.start))
 
         if not timed_tasks:
