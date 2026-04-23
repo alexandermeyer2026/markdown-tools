@@ -219,7 +219,7 @@ class PlannerTool:
                     break
             out.append(PlannerTool.RESET + ' ' * (cols - visible))
             padded.append(''.join(out))
-        sys.stdout.write('\x1b[H' + '\n'.join(padded) + '\x1b[J')
+        sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
         sys.stdout.flush()
 
     # ── Persistence ───────────────────────────────────────────────────────────
