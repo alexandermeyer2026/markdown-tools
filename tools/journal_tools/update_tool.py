@@ -11,7 +11,20 @@ from tools.journal_tools.rendering import (
 )
 
 RED   = '\x1b[31m'
-CYAN  = '\x1b[36m'
+
+CLOCK_DIGITS = {
+    '0': ["███", "█ █", "█ █", "█ █", "███"],
+    '1': [" █ ", " █ ", " █ ", " █ ", " █ "],
+    '2': ["███", "  █", "███", "█  ", "███"],
+    '3': ["███", "  █", "███", "  █", "███"],
+    '4': ["█ █", "█ █", "███", "  █", "  █"],
+    '5': ["███", "█  ", "███", "  █", "███"],
+    '6': ["███", "█  ", "███", "█ █", "███"],
+    '7': ["███", "  █", "  █", "  █", "  █"],
+    '8': ["███", "█ █", "███", "█ █", "███"],
+    '9': ["███", "█ █", "███", "  █", "███"],
+    ':': ["   ", " █ ", "   ", " █ ", "   "],
+}
 
 
 class UpdateTool:
@@ -45,8 +58,7 @@ class UpdateTool:
         }
 
         blocks = []
-        blocks.append(UpdateTool._header(today, now))
-        blocks.append(UpdateTool._calendar(today))
+        blocks.append(UpdateTool._header_and_calendar(today, now))
         if overdue:
             blocks.append(UpdateTool._section_overdue(overdue))
         blocks.append(UpdateTool._section_today(today, now, today_tasks))
@@ -83,27 +95,22 @@ class UpdateTool:
         bar_len = max(0, cols - len(label) - 7)
         return f"  {GRAY}──{RESET} {BOLD}{label}{RESET} {GRAY}{'─' * bar_len}{RESET}"
 
-    # ── Header ────────────────────────────────────────────────────────────────
+    # ── Header + Calendar ─────────────────────────────────────────────────────
+
+    # Visual width of one clock line: 2 indent + 5 glyphs × 3 + 4 separator spaces
+    _CLOCK_VISUAL_W = 21
 
     @staticmethod
-    def _header(today, now):
-        day_name  = today.strftime('%A')
-        date_str  = today.strftime('%-d %B %Y')
-        week_num  = today.isocalendar()[1]
-        time_str  = now.strftime('%H:%M')
-
-        left_text  = f"  {day_name}, {date_str}  ·  Week {week_num}"
-        right_text = f"{time_str}  "
-        gap = max(1, UpdateTool._cols() - len(left_text) - len(right_text))
-
-        left  = f"  {BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
-        right = f"{BOLD}{time_str}{RESET}  "
-        return [left + ' ' * gap + right]
-
-    # ── Calendar ──────────────────────────────────────────────────────────────
+    def _big_clock_lines(now):
+        time_str = now.strftime('%H:%M')
+        lines = []
+        for row in range(5):
+            parts = [CLOCK_DIGITS.get(ch, ['   '] * 5)[row] for ch in time_str]
+            lines.append('  ' + ' '.join(parts))
+        return lines
 
     @staticmethod
-    def _calendar(today):
+    def _calendar_lines(today):
         month_name   = today.strftime('%B %Y')
         weeks        = calendar.monthcalendar(today.year, today.month)
         current_week = next(
@@ -127,6 +134,28 @@ class UpdateTool:
             lines.append(row)
 
         return lines
+
+    @staticmethod
+    def _header_and_calendar(today, now):
+        day_name = today.strftime('%A')
+        date_str = today.strftime('%-d %B %Y')
+        week_num = today.isocalendar()[1]
+        header   = f"  {BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
+
+        clock_lines = UpdateTool._big_clock_lines(now)
+        cal_lines   = UpdateTool._calendar_lines(today)
+
+        gap   = '   '
+        n     = len(cal_lines)
+        pad   = max(0, (n - 5) // 2)
+        empty = ' ' * UpdateTool._CLOCK_VISUAL_W
+
+        clock_padded = [empty] * pad + clock_lines + [empty] * (n - pad - 5)
+
+        result = [header]
+        for c, cal in zip(clock_padded, cal_lines):
+            result.append(c + gap + cal)
+        return result
 
     # ── Overdue ───────────────────────────────────────────────────────────────
 
