@@ -363,7 +363,7 @@ class PlannerTool:
             lines = f.readlines()
 
         for task in timed_tasks + untimed_tasks:
-            if task.line_number > 0 and original_lines.get(task.line_number) != task.to_line():
+            if task.line_number in original_lines and original_lines[task.line_number] != task.to_line():
                 lines[task.line_number - 1] = task.to_line() + '\n'
 
         for task in new_tasks:

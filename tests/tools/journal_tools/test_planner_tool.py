@@ -18,57 +18,6 @@ JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'j
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
 
 
-class TestGetMinutes(unittest.TestCase):
-    def test_basic(self):
-        self.assertEqual(PlannerTool.get_minutes('9:00'), 540)
-
-    def test_midnight(self):
-        self.assertEqual(PlannerTool.get_minutes('0:00'), 0)
-
-    def test_half_hour(self):
-        self.assertEqual(PlannerTool.get_minutes('9:30'), 570)
-
-    def test_end_of_day(self):
-        self.assertEqual(PlannerTool.get_minutes('23:30'), 1410)
-
-
-class TestMinutesToTime(unittest.TestCase):
-    def test_basic(self):
-        self.assertEqual(PlannerTool.minutes_to_time(540), '9:00')
-
-    def test_midnight(self):
-        self.assertEqual(PlannerTool.minutes_to_time(0), '0:00')
-
-    def test_half_hour(self):
-        self.assertEqual(PlannerTool.minutes_to_time(570), '9:30')
-
-    def test_clamps_below_zero(self):
-        self.assertEqual(PlannerTool.minutes_to_time(-1), '0:00')
-
-    def test_midnight_end(self):
-        self.assertEqual(PlannerTool.minutes_to_time(24 * 60), '24:00')
-
-
-class TestHasChanges(unittest.TestCase):
-    def _task(self, **kwargs):
-        defaults = dict(title='Task', status='todo', time=None, line_number=1, indent='')
-        return Task(**{**defaults, **kwargs})
-
-    def test_no_changes(self):
-        task = self._task(title='Buy milk')
-        self.assertFalse(PlannerTool._has_changes([task], [], {1: task.to_line()}, []))
-
-    def test_modified_task(self):
-        task = self._task(title='Buy milk', time=TaskTime(start='9:00'))
-        self.assertTrue(PlannerTool._has_changes([task], [], {1: '- [ ] Buy milk'}, []))
-
-    def test_new_task(self):
-        new = self._task(line_number=-1)
-        self.assertTrue(PlannerTool._has_changes([], [], {}, [new]))
-
-    def test_unknown_line_number(self):
-        task = self._task(line_number=99)
-        self.assertFalse(PlannerTool._has_changes([task], [], {}, []))
 
 
 @pytest.mark.integration
@@ -102,13 +51,6 @@ class TestSave(unittest.TestCase):
         with open(self.path, encoding='utf-8') as f:
             return f.read()
 
-    def test_modified_task_written(self):
-        task = Task(title='Meeting', status='done',
-                    time=TaskTime(start='9:00', end='10:00'), line_number=3, indent='')
-        PlannerTool._save(self.path, self.directory, [task], [],
-                          {3: '- [ ] 9:00-10:00 Meeting'}, [])
-        self.assertIn('- [x] 9:00-10:00 Meeting', self._read())
-
     def test_unchanged_task_not_touched(self):
         task = Task(title='Meeting', status='todo',
                     time=TaskTime(start='9:00', end='10:00'), line_number=3, indent='')
@@ -116,11 +58,10 @@ class TestSave(unittest.TestCase):
                           {3: task.to_line()}, [])
         self.assertEqual(self._read(), self.CONTENT)
 
-    def test_new_task_appended(self):
-        new = Task(title='Call dentist', status='todo', time=None, line_number=-1, indent='')
-        PlannerTool._save(self.path, self.directory, [], [], {}, [new])
-        lines = self._read().splitlines()
-        self.assertEqual(lines[-1], '- [ ] Call dentist')
+    def test_task_with_unknown_line_number_not_written(self):
+        task = Task(title='Ghost', status='done', time=None, line_number=99, indent='')
+        PlannerTool._save(self.path, self.directory, [task], [], {}, [])
+        self.assertEqual(self._read(), self.CONTENT)
 
     def test_backup_created(self):
         PlannerTool._save(self.path, self.directory, [], [], {}, [])

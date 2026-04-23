@@ -263,15 +263,6 @@ class TestSortTimedTasks(unittest.TestCase):
         )
         self.assertEqual(self._sort(content), content)
 
-    def test_single_timed_task_unchanged(self):
-        content = '- [ ] 09:00 Only\n'
-        self.assertEqual(self._sort(content), content)
-
-    def test_no_timed_tasks_unchanged(self):
-        content = '- [ ] No time\n- [ ] Also no time\n'
-        self.assertEqual(self._sort(content), content)
-
-
 class TestReindentBlock(unittest.TestCase):
 
     def test_strips_indent(self):

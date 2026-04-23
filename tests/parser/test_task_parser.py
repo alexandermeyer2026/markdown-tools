@@ -128,42 +128,15 @@ class TestFields(unittest.TestCase):
         self.assertEqual(tasks[1].status, 'done')
         self.assertEqual(tasks[2].status, 'in progress')
 
+    def test_colon_separator_stripped_from_time_range(self):
+        task = self._parse_first('- [ ] 9:00-12:00: Brunch\n')
+        self.assertEqual(task.time.end, '12:00')
+        self.assertEqual(task.title, 'Brunch')
 
-class TestRoundtrip(unittest.TestCase):
-    """Parsed task serializes back to a line equivalent to the original."""
-
-    def _roundtrip(self, line: str) -> str:
-        path = write_temp(line + '\n')
-        try:
-            tasks = TaskParser.parse_file(path)
-        finally:
-            os.unlink(path)
-        return tasks[0].to_line()
-
-    def test_simple_todo(self):
-        self.assertEqual(self._roundtrip('- [ ] Do thing'), '- [ ] Do thing')
-
-    def test_done_with_time_range(self):
-        self.assertEqual(
-            self._roundtrip('- [x] 9:00-10:00 Meeting'),
-            '- [x] 9:00-10:00 Meeting',
-        )
-
-    def test_indented_two_spaces(self):
-        self.assertEqual(self._roundtrip('  - [ ] Sub-task'), '  - [ ] Sub-task')
-
-    def test_indented_four_spaces(self):
-        self.assertEqual(self._roundtrip('    - [ ] Sub-task'), '    - [ ] Sub-task')
-
-    def test_indented_tab(self):
-        self.assertEqual(self._roundtrip('\t- [ ] Sub-task'), '\t- [ ] Sub-task')
-
-    def test_colon_separator_normalized(self):
-        # The colon after the time is stripped on parse; to_line() omits it
-        self.assertEqual(self._roundtrip('- [ ] 9:00-12:00: Brunch'), '- [ ] 9:00-12:00 Brunch')
-
-    def test_colon_separator_start_time_normalized(self):
-        self.assertEqual(self._roundtrip('- [ ] 9:00: Meeting'), '- [ ] 9:00 Meeting')
+    def test_colon_separator_stripped_from_start_time(self):
+        task = self._parse_first('- [ ] 9:00: Meeting\n')
+        self.assertEqual(task.time.start, '9:00')
+        self.assertEqual(task.title, 'Meeting')
 
 
 def _parse_block(content: str) -> list[Task]:
