@@ -171,7 +171,7 @@ class PlannerTool:
         if not all_tasks:
             print(f"\n  {PlannerTool.GRAY}No tasks. Press n to add one.{PlannerTool.RESET}")
 
-        print(f"\n  {PlannerTool.GRAY}[j/k] move  [h/l] shift  [H/L] end time  [n] new  [q] quit{PlannerTool.RESET}")
+        print(f"\n  {PlannerTool.GRAY}[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  [n] new  [q] quit{PlannerTool.RESET}")
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
@@ -305,6 +305,15 @@ class PlannerTool:
                         new_end = min(start_m + step_m, 24 * 60)
                     task.time = TaskTime(start=task.time.start,
                                          end=PlannerTool.minutes_to_time(new_end))
+
+            elif key == 'r':
+                if all_tasks:
+                    task = all_tasks[cursor_idx]
+                    if task.time and task in timed_tasks:
+                        task.time = None
+                        timed_tasks.remove(task)
+                        untimed_tasks.insert(0, task)
+                        cursor_idx = min(cursor_idx, len(timed_tasks + untimed_tasks) - 1)
 
             elif key == 'n':
                 sys.stdout.write('\x1b[2J\x1b[H')

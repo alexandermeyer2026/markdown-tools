@@ -242,3 +242,16 @@ class TestInteractivePlan(unittest.TestCase):
     def test_new_task_empty_title_ignored(self):
         result = self._run(['n', 'q'], inputs=['', 'q'])
         self.assertEqual(result, {})
+
+    def test_remove_time_moves_task_to_untimed(self):
+        result = self._run(['r', 'q'], inputs=['y'])
+        timed_titles   = [t.title for t in result['timed']]
+        untimed_titles = [t.title for t in result['untimed']]
+        self.assertNotIn('Meeting', timed_titles)
+        self.assertIn('Meeting', untimed_titles)
+        meeting = next(t for t in result['untimed'] if t.title == 'Meeting')
+        self.assertIsNone(meeting.time)
+
+    def test_remove_time_on_untimed_task_is_noop(self):
+        result = self._run(['j', 'r', 'q'])
+        self.assertEqual(result, {})
