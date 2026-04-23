@@ -3,7 +3,7 @@ import unittest
 from models.task import Task, TaskTime
 
 
-class TestTaskTime(unittest.TestCase):
+class TestTime(unittest.TestCase):
     def test_to_str_start_only(self):
         self.assertEqual(TaskTime(start='9:00').to_str(), '9:00')
 
@@ -11,7 +11,7 @@ class TestTaskTime(unittest.TestCase):
         self.assertEqual(TaskTime(start='9:00', end='10:00').to_str(), '9:00-10:00')
 
 
-class TestTaskToLine(unittest.TestCase):
+class TestToLine(unittest.TestCase):
     def _task(self, **kwargs):
         defaults = dict(title='Do thing', status='todo', time=None, line_number=1, indent='')
         return Task(**{**defaults, **kwargs})

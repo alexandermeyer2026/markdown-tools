@@ -16,7 +16,7 @@ with open(FIXTURE, encoding='utf-8') as f:
 
 
 @pytest.mark.integration
-class TestCatchUpToolIntegration(unittest.TestCase):
+class TestIntegration(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(
             mode='w', suffix='.md', delete=False, encoding='utf-8'

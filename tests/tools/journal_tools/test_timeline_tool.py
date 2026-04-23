@@ -20,7 +20,7 @@ def strip_ansi(text: str) -> str:
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
-class TestTimelineToolGetTimeSlot(unittest.TestCase):
+class TestGetTimeSlot(unittest.TestCase):
     def test_get_time_slot(self):
         cases = [
             (0, 1.0, 0),    # 0:00
@@ -38,7 +38,7 @@ class TestTimelineToolGetTimeSlot(unittest.TestCase):
                 self.assertEqual(TimelineTool.get_time_slot(minutes, step_size_hours), expected)
 
 
-class TestTimelineToolRenderScale(unittest.TestCase):
+class TestRenderScale(unittest.TestCase):
     def test_render_scale(self):
         cases = [
             (1.0, 0, 0,
@@ -75,7 +75,7 @@ class TestTimelineToolRenderScale(unittest.TestCase):
 
 
 @pytest.mark.integration
-class TestTimelineToolIntegration(unittest.TestCase):
+class TestIntegration(unittest.TestCase):
     EXPECTED_OUTPUT = (
         "    12    18    24\n"
         "────┼─────┼─────┤\n"

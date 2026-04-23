@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 from os_utils import FileFinder
-from tools.journal_tools import TimelineTool, CatchUpTool
+from tools.journal_tools import CatchUpTool, PlannerTool, TimelineTool
 
 
 def _is_date(date_string: str) -> bool:
@@ -48,6 +48,7 @@ def main():
     subcommands = {
         'timeline': lambda a: TimelineTool.run(a, journal_dir),
         'catch-up': lambda a: CatchUpTool.run(a, journal_dir),
+        'planner':  lambda a: PlannerTool.run(a, journal_dir),
     }
 
     if sub in subcommands:

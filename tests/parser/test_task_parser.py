@@ -13,7 +13,7 @@ def write_temp(content: str) -> str:
     return f.name
 
 
-class TestTaskParserStatus(unittest.TestCase):
+class TestStatus(unittest.TestCase):
     def _parse(self, line: str) -> Task:
         path = write_temp(line + '\n')
         try:
@@ -50,7 +50,7 @@ class TestTaskParserStatus(unittest.TestCase):
         self.assertEqual(tasks, [])
 
 
-class TestTaskParserFields(unittest.TestCase):
+class TestFields(unittest.TestCase):
     def _parse_first(self, content: str) -> Task:
         path = write_temp(content)
         try:
