@@ -118,21 +118,26 @@ class PlannerTool:
     def _task_row(task: Task, step_size_hours: float, first_slot: int, is_selected: bool) -> str:
         icon  = PlannerTool.STATUS_ICONS.get(task.status, '?')
         color = PlannerTool.STATUS_COLORS.get(task.status, PlannerTool.GRAY)
-        label = f" {color}{icon}{PlannerTool.RESET} {PlannerTool.BOLD}{task.title}{PlannerTool.RESET}"
 
         if task.time:
+            label = f" {color}{icon}{PlannerTool.RESET} {PlannerTool.BOLD}{task.title}{PlannerTool.RESET}"
             start_m = PlannerTool.get_minutes(task.time.start)
             start_slot = end_slot = PlannerTool.get_time_slot(start_m, step_size_hours)
             if task.time.end:
                 end_m = PlannerTool.get_minutes(task.time.end)
                 end_slot = PlannerTool.get_time_slot(end_m - 1, step_size_hours)
             bar = color + '█' * max(end_slot - start_slot + 1, 1) + PlannerTool.RESET
-            line = (' ' * start_slot + bar + f" {task.time.to_str()}" + label)[first_slot:]
+            offset = start_slot - first_slot
+            if is_selected:
+                pre = ' ' * max(offset - 2, 0) + f'\x1b[7m>\x1b[0m '
+            else:
+                pre = ' ' * offset
+            return '  ' + pre + bar + f" {task.time.to_str()}" + label
         else:
-            line = label.lstrip()
+            label = f" {color}{icon}{PlannerTool.RESET} {PlannerTool.BOLD}{task.title}{PlannerTool.RESET}"
+            prefix = f'\x1b[7m>{PlannerTool.RESET} ' if is_selected else '  '
+            return prefix + label.lstrip()
 
-        prefix = f'\x1b[7m>{PlannerTool.RESET} ' if is_selected else '  '
-        return prefix + line
     @staticmethod
     def _icon_col(task: Task, step_size_hours: float, first_slot: int) -> int:
         if not task.time:
