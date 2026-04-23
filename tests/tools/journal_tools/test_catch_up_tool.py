@@ -9,7 +9,7 @@ from parser.task_parser import TaskParser
 from tools.journal_tools.catch_up_tool import CatchUpTool
 
 
-FIXTURE = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', '2024-01-15.md')
+FIXTURE = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal', '2024-01-15.md')
 
 with open(FIXTURE, encoding='utf-8') as f:
     ORIGINAL = f.read()

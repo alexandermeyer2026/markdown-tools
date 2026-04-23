@@ -1,13 +1,21 @@
+import contextlib
+import datetime
+import json
 import os
+import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from io import StringIO
+from unittest.mock import patch, MagicMock
 
 import pytest
 
 from models.task import Task, TaskTime
 from parser.task_parser import TaskParser
 from tools.journal_tools.planner_tool import PlannerTool
+
+JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
 
 
 class TestGetMinutes(unittest.TestCase):
@@ -255,3 +263,56 @@ class TestInteractivePlan(unittest.TestCase):
     def test_remove_time_on_untimed_task_is_noop(self):
         result = self._run(['j', 'r', 'q'])
         self.assertEqual(result, {})
+
+
+class PlannerIntegrationTest(unittest.TestCase):
+
+    def _run_fixture(self, fixture_name):
+        fixture_dir = os.path.join(FIXTURES_DIR, fixture_name)
+        with open(os.path.join(fixture_dir, 'scenario.json')) as f:
+            config = json.load(f)
+
+        args = config['args']
+        key_iter = iter(config['keys'])
+        save_answer = 'y' if config.get('save', False) else 'n'
+        week_today = config.get('week_today')
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            for fname in os.listdir(JOURNAL_DIR):
+                shutil.copy(os.path.join(JOURNAL_DIR, fname), os.path.join(tmpdir, fname))
+
+            patches = [
+                patch.object(PlannerTool, 'read_key', side_effect=lambda: next(key_iter)),
+                patch('builtins.input', return_value=save_answer),
+                patch('sys.stdout', new=StringIO()),
+            ]
+
+            if week_today:
+                fixed = datetime.date.fromisoformat(week_today)
+                mock_dt = MagicMock()
+                mock_dt.date.today.return_value = fixed
+                mock_dt.timedelta = datetime.timedelta
+                mock_dt.datetime = datetime.datetime
+                patches.append(patch('tools.journal_tools.planner_tool.datetime', mock_dt))
+
+            with contextlib.ExitStack() as stack:
+                for p in patches:
+                    stack.enter_context(p)
+                PlannerTool.run(args, directory=tmpdir)
+
+            expected_dir = os.path.join(fixture_dir, 'expected')
+            for fname in sorted(os.listdir(expected_dir)):
+                with open(os.path.join(expected_dir, fname)) as f:
+                    expected = f.read()
+                with open(os.path.join(tmpdir, fname)) as f:
+                    actual = f.read()
+                self.assertEqual(actual, expected, f"Mismatch in {fname}")
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_sort_on_save(self):
+        self._run_fixture('sort_on_save')
+
+    def test_week_move_and_sort(self):
+        self._run_fixture('week_move_and_sort')

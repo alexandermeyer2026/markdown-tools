@@ -12,7 +12,7 @@ from parser.task_parser import TaskParser
 from tools.journal_tools.timeline_tool import TimelineTool
 
 
-FIXTURE = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', '2024-01-15.md')
+FIXTURE = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal', '2024-01-15.md')
 FIXTURE_DATE = datetime.date(2024, 1, 15)
 
 
