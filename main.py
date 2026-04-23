@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 from os_utils import FileFinder
-from tools.journal_tools import CatchUpTool, PlannerTool, TimelineTool
+from tools.journal_tools import CatchUpTool, PlannerTool, TimelineTool, UpdateTool
 
 
 def _is_date(date_string: str) -> bool:
@@ -13,9 +13,16 @@ def _is_date(date_string: str) -> bool:
 
 
 def _get_date(date_string: str) -> datetime.date:
-    if date_string.lower() == 'today':
-        return datetime.date.today()
-    return datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
+    today = datetime.date.today()
+    match date_string.lower():
+        case 'today':
+            return today
+        case 'tomorrow':
+            return today + datetime.timedelta(days=1)
+        case 'yesterday':
+            return today - datetime.timedelta(days=1)
+        case _:
+            return datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
 
 
 def _open_journal_for_date(date_string: str, directory: str) -> None:
@@ -41,7 +48,7 @@ def main():
         return
 
     if len(args) < 2:
-        print(f"Usage: main.py {top} <timeline|catch-up|today|YYYY-MM-DD>")
+        print(f"Usage: main.py {top} <timeline|catch-up|today|yesterday|tomorrow|YYYY-MM-DD>")
         return
 
     sub = args[1].lower()
@@ -49,11 +56,12 @@ def main():
         'timeline': lambda a: TimelineTool.run(a, journal_dir),
         'catch-up': lambda a: CatchUpTool.run(a, journal_dir),
         'planner':  lambda a: PlannerTool.run(a, journal_dir),
+        'update':   lambda a: UpdateTool.run(a, journal_dir),
     }
 
     if sub in subcommands:
         subcommands[sub](args[2:])
-    elif sub == 'today' or _is_date(sub):
+    elif sub in ('today', 'tomorrow', 'yesterday') or _is_date(sub):
         _open_journal_for_date(sub, journal_dir)
     else:
         print(f"Unknown subcommand: {sub}")
