@@ -3,7 +3,7 @@ import os
 from difflib import unified_diff
 
 from models import Task
-from os_utils import FileFinder
+from os_utils import BackupManager, FileFinder
 from parser import TaskParser
 
 
@@ -77,6 +77,7 @@ class CatchUpTool:
                     if pending_changes:
                         save = input("\nThere are unsaved changes. Save? [y/n]: ").strip().lower()
                         if save == 'y':
+                            BackupManager.backup(file_path, directory)
                             CatchUpTool.apply_changes(file_path, pending_changes, lines)
                     return False
 
@@ -114,6 +115,7 @@ class CatchUpTool:
 
             confirm = input("Apply all changes? [y/n]: ").strip().lower()
             if confirm == 'y':
+                BackupManager.backup(file_path, directory)
                 CatchUpTool.apply_changes(file_path, pending_changes, lines)
                 print(f"✓ {len(pending_changes)} change(s) saved")
             else:
