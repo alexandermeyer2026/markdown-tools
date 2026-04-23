@@ -9,15 +9,10 @@ from parser.task_parser import TaskParser
 from tools.journal_tools.catch_up_tool import CatchUpTool
 
 
-ORIGINAL = (
-    "# Journal 2024-01-15\n"
-    "\n"
-    "- [x] 8:00-9:00 Morning routine\n"
-    "- [ ] 9:00-10:30 Work on project\n"
-    "- [x] 10:30-11:00: Coffee break\n"
-    "- [ ] 11:00-12:00: Team meeting\n"
-    "- [ ] 14:00 Review PRs\n"
-)
+FIXTURE = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', '2024-01-15.md')
+
+with open(FIXTURE, encoding='utf-8') as f:
+    ORIGINAL = f.read()
 
 
 @pytest.mark.integration
