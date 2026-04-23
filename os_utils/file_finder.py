@@ -15,6 +15,7 @@ class FileFinder:
         file_paths = []
 
         for root, dirs, files in os.walk(directory):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
             for file in files:
                 if re.search(FileFinder.JOURNAL_FILE_PATTERN, file):
                     file_paths.append(os.path.join(root, file))
