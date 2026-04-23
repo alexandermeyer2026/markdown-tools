@@ -28,7 +28,8 @@ class CatchUpTool:
             ]
 
             if open_tasks:
-                CatchUpTool.interactive_cleanup(directory, file_path, open_tasks)
+                if not CatchUpTool.interactive_cleanup(directory, file_path, open_tasks):
+                    return
 
     @staticmethod
     def interactive_cleanup(directory, file_path, open_tasks: list[Task]):
@@ -77,7 +78,7 @@ class CatchUpTool:
                         save = input("\nThere are unsaved changes. Save? [y/n]: ").strip().lower()
                         if save == 'y':
                             CatchUpTool.apply_changes(file_path, pending_changes, lines)
-                    return
+                    return False
 
                 if action == 's':
                     break
