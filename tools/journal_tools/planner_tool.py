@@ -6,7 +6,7 @@ import sys
 import termios
 import tty
 
-from models import Task, TaskTime
+from models import Task, TaskTime, top_level_tasks
 from os_utils import BackupManager, FileFinder, FileWriter
 from parser import TaskParser
 from tools.journal_tools.rendering import (
@@ -60,10 +60,6 @@ class PlannerTool:
         PlannerTool.interactive_plan(directory, file_path, tasks, date=date)
 
     # ── Utilities ─────────────────────────────────────────────────────────────
-
-    get_minutes    = staticmethod(get_minutes)
-    get_time_slot  = staticmethod(get_time_slot)
-    minutes_to_time = staticmethod(minutes_to_time)
 
     @staticmethod
     def read_key() -> str:
@@ -180,7 +176,7 @@ class PlannerTool:
                 all_tasks = TaskParser.parse_file(files[0])
                 file_paths.append(files[0])
                 all_tasks_per_day.append(all_tasks)
-                week_tasks.append([t for t in all_tasks if t.parent is None])
+                week_tasks.append(top_level_tasks(all_tasks))
             else:
                 file_paths.append(None)
                 all_tasks_per_day.append([])
@@ -348,7 +344,7 @@ class PlannerTool:
                             all_tasks = TaskParser.parse_file(fs[0])
                             file_paths[i] = fs[0]
                             all_tasks_per_day[i] = all_tasks
-                            week_tasks[i] = [t for t in all_tasks if t.parent is None]
+                            week_tasks[i] = top_level_tasks(all_tasks)
                         else:
                             file_paths[i] = None
                             all_tasks_per_day[i] = []

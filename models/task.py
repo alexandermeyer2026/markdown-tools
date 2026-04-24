@@ -1,7 +1,21 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+def get_minutes(time_str: str) -> int:
+    m = re.match(r'(\d{1,2}):(\d{2})', time_str)
+    if not m:
+        raise ValueError(f"Invalid time string: {time_str}")
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
+def minutes_to_time(minutes: int) -> str:
+    if minutes >= 24 * 60:
+        return '24:00'
+    return f"{max(0, minutes) // 60}:{max(0, minutes) % 60:02d}"
 
 
 @dataclass

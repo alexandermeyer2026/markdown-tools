@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from models.task import Task, TaskTime
+from models import Task, TaskTime, minutes_to_time
 from parser.task_parser import TaskParser
 from tools.journal_tools.planner_tool import PlannerTool
 
@@ -126,14 +126,14 @@ class TestInteractivePlan(unittest.TestCase):
     def test_shift_right(self):
         result = self._run(['l', 'q'], inputs=['y'])
         task = result['timed'][0]
-        self.assertEqual(task.time.start, PlannerTool.minutes_to_time(540 + self.STEP_M))
-        self.assertEqual(task.time.end,   PlannerTool.minutes_to_time(600 + self.STEP_M))
+        self.assertEqual(task.time.start, minutes_to_time(540 + self.STEP_M))
+        self.assertEqual(task.time.end,   minutes_to_time(600 + self.STEP_M))
 
     def test_shift_left(self):
         result = self._run(['h', 'q'], inputs=['y'])
         task = result['timed'][0]
-        self.assertEqual(task.time.start, PlannerTool.minutes_to_time(540 - self.STEP_M))
-        self.assertEqual(task.time.end,   PlannerTool.minutes_to_time(600 - self.STEP_M))
+        self.assertEqual(task.time.start, minutes_to_time(540 - self.STEP_M))
+        self.assertEqual(task.time.end,   minutes_to_time(600 - self.STEP_M))
 
     def test_shift_clamps_at_zero(self):
         presses = 540 // self.STEP_M + 5  # enough to reach 0:00 from 9:00
@@ -141,19 +141,19 @@ class TestInteractivePlan(unittest.TestCase):
         result = self._run(keys, inputs=['y'])
         task = result['timed'][0]
         self.assertEqual(task.time.start, '0:00')
-        self.assertEqual(task.time.end, PlannerTool.minutes_to_time(60))  # duration preserved
+        self.assertEqual(task.time.end, minutes_to_time(60))  # duration preserved
 
     def test_extend_end_time(self):
         result = self._run(['L', 'q'], inputs=['y'])
         task = result['timed'][0]
         self.assertEqual(task.time.start, '9:00')
-        self.assertEqual(task.time.end, PlannerTool.minutes_to_time(600 + self.STEP_M))
+        self.assertEqual(task.time.end, minutes_to_time(600 + self.STEP_M))
 
     def test_shrink_end_time(self):
         result = self._run(['H', 'q'], inputs=['y'])
         task = result['timed'][0]
         self.assertEqual(task.time.start, '9:00')
-        self.assertEqual(task.time.end, PlannerTool.minutes_to_time(600 - self.STEP_M))
+        self.assertEqual(task.time.end, minutes_to_time(600 - self.STEP_M))
 
     def test_shrink_fuses_at_minimum_duration(self):
         # shrink until end == start → fuses to start-time only (task is 9:00-10:00 = 60 min)
@@ -168,7 +168,7 @@ class TestInteractivePlan(unittest.TestCase):
         result = self._run(['j', 'l', 'L', 'q'], inputs=['y'])
         milk = next(t for t in result['timed'] if t.title == 'Buy milk')
         self.assertEqual(milk.time.start, '12:00')
-        self.assertEqual(milk.time.end, PlannerTool.minutes_to_time(720 + self.STEP_M))
+        self.assertEqual(milk.time.end, minutes_to_time(720 + self.STEP_M))
 
     def test_untimed_task_moves_to_noon(self):
         result = self._run(['j', 'l', 'q'], inputs=['y'])
@@ -181,7 +181,7 @@ class TestInteractivePlan(unittest.TestCase):
         # j then k returns to first task; l shifts it
         result = self._run(['j', 'k', 'l', 'q'], inputs=['y'])
         task = result['timed'][0]
-        self.assertEqual(task.time.start, PlannerTool.minutes_to_time(540 + self.STEP_M))
+        self.assertEqual(task.time.start, minutes_to_time(540 + self.STEP_M))
 
     def test_new_task_added_to_untimed(self):
         result = self._run(['n', 'q'], inputs=['Call dentist', 'y'])

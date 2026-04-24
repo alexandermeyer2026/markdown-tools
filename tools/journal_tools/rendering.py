@@ -1,7 +1,7 @@
 import math
 import re
 
-from models import Task
+from models import Task, get_minutes, minutes_to_time
 
 STATUS_ICONS = {'todo': '○', 'in progress': '◐', 'done': '✓', 'failed': '✗', 'started': '~'}
 STATUS_COLORS = {
@@ -12,22 +12,11 @@ STATUS_COLORS = {
 }
 BOLD  = '\x1b[1m'
 GRAY  = '\x1b[90m'
+RED   = '\x1b[31m'
+GREEN = '\x1b[32m'
 RESET = '\x1b[0m'
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
-
-
-def get_minutes(time_str: str) -> int:
-    m = re.match(r'(\d{1,2}):(\d{2})', time_str)
-    if not m:
-        raise ValueError(f"Invalid time string: {time_str}")
-    return int(m.group(1)) * 60 + int(m.group(2))
-
-
-def minutes_to_time(minutes: int) -> str:
-    if minutes >= 24 * 60:
-        return '24:00'
-    return f"{max(0, minutes) // 60}:{max(0, minutes) % 60:02d}"
 
 
 def get_time_slot(minutes: int, step_size_hours: float) -> int:

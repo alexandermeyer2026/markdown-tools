@@ -5,6 +5,7 @@ from difflib import unified_diff
 from models import Task
 from os_utils import BackupManager, FileFinder
 from parser import TaskParser
+from tools.journal_tools.rendering import BOLD, GRAY, GREEN, RED, RESET
 
 
 class CatchUpTool:
@@ -49,10 +50,6 @@ class CatchUpTool:
             end_idx = min(len(lines), line_num + context_radius)
 
             print(f"\n{idx}/{len(open_tasks)} open tasks in {rel_path} (line {line_num}):")
-
-            BOLD = "\033[1m"
-            GRAY = "\033[90m"
-            RESET = "\033[0m"
 
             print("   ┌" + "─" * 76)
             for i in range(start_idx, end_idx):
@@ -100,10 +97,6 @@ class CatchUpTool:
             print(f"\n{len(pending_changes)} change(s) in {rel_path}:")
 
             sorted_changes = sorted(pending_changes, key=lambda x: x[0])
-
-            RED = "\033[31m"
-            GREEN = "\033[32m"
-            RESET = "\033[0m"
 
             print("   ┌" + "─" * 76)
             for idx, (line_num, old_line, new_line) in enumerate(sorted_changes):

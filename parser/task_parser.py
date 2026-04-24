@@ -6,6 +6,7 @@ from models import Task, TaskTime
 
 class TaskParser:
     _config = None
+    _char_to_status_map = None
 
     @classmethod
     def _get_config(cls) -> dict:
@@ -15,11 +16,13 @@ class TaskParser:
 
     @classmethod
     def _char_to_status(cls) -> dict:
-        return {
-            char: status
-            for status, chars in cls._get_config()['status_chars'].items()
-            for char in chars
-        }
+        if cls._char_to_status_map is None:
+            cls._char_to_status_map = {
+                char: status
+                for status, chars in cls._get_config()['status_chars'].items()
+                for char in chars
+            }
+        return cls._char_to_status_map
 
     @classmethod
     def parse_file(cls, file_path) -> list[Task]:
@@ -31,7 +34,7 @@ class TaskParser:
         tasks: list[Task] = []
         stack: list[Task] = []  # ancestor tasks ordered by increasing indent depth
 
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             for line_number, line in enumerate(f, 1):
                 match = re.search(checkbox_pattern, line)
 

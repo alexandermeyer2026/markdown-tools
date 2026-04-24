@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from parser.task_parser import TaskParser
+from tools.journal_tools.rendering import get_time_slot
 from tools.journal_tools.timeline_tool import TimelineTool
 
 
@@ -35,7 +36,7 @@ class TestGetTimeSlot(unittest.TestCase):
         ]
         for minutes, step_size_hours, expected in cases:
             with self.subTest(minutes=minutes, step_size_hours=step_size_hours):
-                self.assertEqual(TimelineTool.get_time_slot(minutes, step_size_hours), expected)
+                self.assertEqual(get_time_slot(minutes, step_size_hours), expected)
 
 
 class TestRenderScale(unittest.TestCase):

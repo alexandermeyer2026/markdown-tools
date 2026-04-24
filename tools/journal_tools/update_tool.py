@@ -6,11 +6,9 @@ import shutil
 from os_utils import FileFinder
 from parser import TaskParser
 from tools.journal_tools.rendering import (
-    STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RESET,
+    STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
     ansi_truncate_pad, get_minutes, get_time_slot, scale_lines,
 )
-
-RED   = '\x1b[31m'
 
 CLOCK_DIGITS = {
     '0': ["███", "█ █", "█ █", "█ █", "███"],

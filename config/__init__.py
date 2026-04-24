@@ -14,7 +14,7 @@ def get_task_config() -> dict:
 
     path = _USER_CONFIG if os.path.exists(_USER_CONFIG) else _DEFAULT_CONFIG
 
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
 
     if not data:

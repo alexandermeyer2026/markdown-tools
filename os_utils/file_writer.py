@@ -1,6 +1,6 @@
 import os
 
-from models.task import Task
+from models import Task, get_minutes
 
 
 class FileWriter:
@@ -85,7 +85,7 @@ class FileWriter:
             ranges = [block_range(t) for t in group]
             blocks = [lines[s:e] for s, e in ranges]
             position_order = sorted(range(len(group)), key=lambda i: ranges[i][0])
-            time_order = sorted(range(len(group)), key=lambda i: _time_to_minutes(group[i].time.start))
+            time_order = sorted(range(len(group)), key=lambda i: get_minutes(group[i].time.start))
             for k in range(len(group)):
                 all_assignments.append((ranges[position_order[k]], blocks[time_order[k]]))
 
@@ -108,11 +108,6 @@ class FileWriter:
             else:
                 result.append(line)
         return result
-
-
-def _time_to_minutes(time_str: str) -> int:
-    h, m = time_str.split(':')
-    return int(h) * 60 + int(m)
 
 
 def _write_atomic(file_path: str, lines: list[str]) -> None:

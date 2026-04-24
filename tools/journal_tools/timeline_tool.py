@@ -15,9 +15,6 @@ from tools.journal_tools.rendering import (
 
 class TimelineTool:
 
-    get_minutes   = staticmethod(get_minutes)
-    get_time_slot = staticmethod(get_time_slot)
-
     @staticmethod
     def run(args, directory='.'):
         if not args:
@@ -78,7 +75,7 @@ class TimelineTool:
         print(scale_line)
 
     @staticmethod
-    def render_task(task: Task, step_size_hours: float, terminal_width: int, first_task_slot: int, now_marker_slot: int) -> str:
+    def render_task(task: Task, step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> str:
         start_minutes = get_minutes(task.time.start)
         start_slot = end_slot = get_time_slot(start_minutes, step_size_hours)
         if task.time.end:
@@ -112,9 +109,9 @@ class TimelineTool:
         return (start_slot - first_task_slot) + bar_width + 1
 
     @staticmethod
-    def render_tasks(timed_tasks: list[Task], step_size_hours: float, terminal_width: int, first_task_slot: int, now_marker_slot: int) -> None:
+    def render_tasks(timed_tasks: list[Task], step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> None:
         for task in timed_tasks:
-            line = TimelineTool.render_task(task, step_size_hours, terminal_width, first_task_slot, now_marker_slot)
+            line = TimelineTool.render_task(task, step_size_hours, first_task_slot, now_marker_slot)
             print(line)
             for row in subtask_rows(task, left_pad=TimelineTool._icon_col(task, step_size_hours, first_task_slot)):
                 print(row)
@@ -147,4 +144,4 @@ class TimelineTool:
             now_marker_slot = get_time_slot(current_minutes, step_size_hours)
 
         TimelineTool.render_scale(step_size_hours, first_task_slot, now_marker_slot)
-        TimelineTool.render_tasks(timed_tasks, step_size_hours, terminal_width, first_task_slot, now_marker_slot)
+        TimelineTool.render_tasks(timed_tasks, step_size_hours, first_task_slot, now_marker_slot)
