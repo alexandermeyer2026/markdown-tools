@@ -150,7 +150,7 @@ class PlannerTool:
         if not all_tasks:
             lines.append(f"\n  {GRAY}No tasks. Press n to add one.{RESET}")
 
-        lines.append(f"\n  {GRAY}[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  [n] new  [q] quit{RESET}")
+        lines.append(f"\n  {GRAY}[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  [n] new  [t/i/d/f] status  [q] quit{RESET}")
 
         cols = shutil.get_terminal_size(fallback=(80, 24)).columns
         padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
@@ -185,14 +185,18 @@ class PlannerTool:
         PlannerTool.interactive_week(week_days, week_tasks, file_paths, all_tasks_per_day, directory)
 
     @staticmethod
-    def _week_cell(title: str, col_width: int, is_selected: bool) -> str:
+    def _week_cell(task: Task | None, col_width: int, is_selected: bool) -> str:
         prefix = '> ' if is_selected else '  '
-        text = prefix + title
-        if len(text) > col_width:
-            text = text[:col_width - 3] + '...'
-        else:
-            text = text.ljust(col_width)
-        return f'\x1b[7m{text}{RESET}' if is_selected else text
+        if task is None:
+            text = prefix.ljust(col_width)
+            return f'\x1b[7m{text}{RESET}' if is_selected else text
+        icon      = STATUS_ICONS.get(task.status, '?')
+        color     = STATUS_COLORS.get(task.status, GRAY)
+        title_max = col_width - 4  # 2 prefix + 1 icon + 1 space
+        title_str = task.title[:title_max].ljust(title_max)
+        if is_selected:
+            return f'\x1b[7m{prefix}{icon} {title_str}{RESET}'
+        return f'{prefix}{color}{icon}{RESET} {title_str}'
 
     @staticmethod
     def render_week(week_days: list, week_tasks: list, cursor_col: int, cursor_row: int):
@@ -227,14 +231,14 @@ class PlannerTool:
                 tasks = week_tasks[col_idx]
                 is_selected = (col_idx == cursor_col and row == cursor_row)
                 if row < len(tasks):
-                    line += PlannerTool._week_cell(tasks[row].title, col_width, is_selected)
+                    line += PlannerTool._week_cell(tasks[row], col_width, is_selected)
                 elif is_selected:
-                    line += PlannerTool._week_cell('', col_width, True)
+                    line += PlannerTool._week_cell(None, col_width, True)
                 else:
                     line += ' ' * col_width
             lines.append(line)
 
-        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task left/right  [Enter] open day  [q] quit{RESET}")
+        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
 
         padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
         sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
@@ -297,6 +301,7 @@ class PlannerTool:
         cursor_col = next((i for i, t in enumerate(week_tasks) if t), 0)
         cursor_row = 0
         has_changes = False
+        status_changed: set = set()
         original_tasks_by_col = [list(col) for col in week_tasks]
 
         while True:
@@ -309,6 +314,9 @@ class PlannerTool:
                     sys.stdout.flush()
                     confirm = input("Save changes? [y/n]: ").strip().lower()
                     if confirm == 'y':
+                        PlannerTool._save_week_status(
+                            original_tasks_by_col, file_paths, status_changed, directory,
+                        )
                         PlannerTool._save_week(
                             week_tasks, original_tasks_by_col,
                             file_paths, all_tasks_per_day, week_days, directory,
@@ -331,6 +339,9 @@ class PlannerTool:
                     if has_changes:
                         confirm = input("Save changes? [y/n]: ").strip().lower()
                         if confirm == 'y':
+                            PlannerTool._save_week_status(
+                                original_tasks_by_col, file_paths, status_changed, directory,
+                            )
                             PlannerTool._save_week(
                                 week_tasks, original_tasks_by_col,
                                 file_paths, all_tasks_per_day, week_days, directory,
@@ -350,6 +361,7 @@ class PlannerTool:
                             all_tasks_per_day[i] = []
                             week_tasks[i] = []
                     original_tasks_by_col = [list(col) for col in week_tasks]
+                    status_changed = set()
                     has_changes = False
 
             elif key == 'j':
@@ -375,6 +387,14 @@ class PlannerTool:
                 if cursor_row >= 0:
                     cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
 
+            elif key in ('t', 'i', 'd', 'f') and cursor_row >= 0:
+                tasks = week_tasks[cursor_col]
+                if tasks and cursor_row < len(tasks):
+                    task = tasks[cursor_row]
+                    task.status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
+                    status_changed.add(id(task))
+                    has_changes = True
+
             elif key == 'H' and cursor_col > 0 and week_tasks[cursor_col]:
                 cursor_row = PlannerTool._move_task_week(week_tasks, cursor_col, cursor_col - 1, cursor_row)
                 cursor_col -= 1
@@ -384,6 +404,30 @@ class PlannerTool:
                 cursor_row = PlannerTool._move_task_week(week_tasks, cursor_col, cursor_col + 1, cursor_row)
                 cursor_col += 1
                 has_changes = True
+
+    @staticmethod
+    def _save_week_status(original_tasks_by_col, file_paths, status_changed: set, directory):
+        for col_idx, tasks in enumerate(original_tasks_by_col):
+            fp = file_paths[col_idx]
+            if not fp:
+                continue
+            changed = [t for t in tasks if id(t) in status_changed]
+            if not changed:
+                continue
+            BackupManager.backup(fp, directory)
+            with open(fp, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            for task in changed:
+                lines[task.line_number - 1] = task.to_line() + '\n'
+            tmp = fp + '.tmp'
+            try:
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+                os.replace(tmp, fp)
+            except Exception:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+                raise
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
@@ -521,6 +565,10 @@ class PlannerTool:
                         new_end = min(start_m + step_m, 24 * 60)
                     task.time = TaskTime(start=task.time.start,
                                          end=minutes_to_time(new_end))
+
+            elif key in ('t', 'i', 'd', 'f'):
+                if all_tasks:
+                    all_tasks[cursor_idx].status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
 
             elif key == 'r':
                 if all_tasks:
