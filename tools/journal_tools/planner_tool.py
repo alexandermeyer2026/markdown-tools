@@ -72,8 +72,8 @@ class PlannerTool:
         try:
             tty.setraw(fd)
             ch = sys.stdin.read(1)
-            if ch == '\x1b':
-                ch += sys.stdin.read(2)
+            if not ch:
+                raise EOFError("stdin closed")
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
         return ch
@@ -214,7 +214,12 @@ class PlannerTool:
         for i, day in enumerate(week_days):
             label = f"{PlannerTool.DAY_NAMES[i]} {day.strftime('%m/%d')}"
             padded = label.ljust(col_width)
-            header += f"{BOLD}{padded}{RESET}" if day == today else padded
+            if cursor_row == -1 and i == cursor_col:
+                header += f"\x1b[7m{padded}{RESET}"
+            elif day == today:
+                header += f"{BOLD}{padded}{RESET}"
+            else:
+                header += padded
         lines.append(header)
         lines.append(margin + ('─' * (col_width - 1) + ' ') * 7)
 
@@ -233,7 +238,7 @@ class PlannerTool:
                     line += ' ' * col_width
             lines.append(line)
 
-        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task left/right  [q] quit{RESET}")
+        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task left/right  [Enter] open day  [q] quit{RESET}")
 
         padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
         sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
@@ -315,23 +320,64 @@ class PlannerTool:
                         print("✓ Changes saved")
                 break
 
+            elif key == '\r':
+                if cursor_row == -1:
+                    day = week_days[cursor_col]
+                    files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
+                    if files:
+                        tasks = TaskParser.parse_file(files[0])
+                    else:
+                        files = [os.path.join(directory, day.strftime('%Y-%m-%d.md'))]
+                        open(files[0], 'w').close()
+                        tasks = []
+                    sys.stdout.write('\x1b[2J\x1b[H')
+                    sys.stdout.flush()
+                    if has_changes:
+                        confirm = input("Save changes? [y/n]: ").strip().lower()
+                        if confirm == 'y':
+                            PlannerTool._save_week(
+                                week_tasks, original_tasks_by_col,
+                                file_paths, all_tasks_per_day, week_days, directory,
+                            )
+                            tasks = TaskParser.parse_file(files[0])
+                    PlannerTool.interactive_plan(directory, files[0], tasks, date=day)
+                    # Reload week data after returning from daily planner
+                    for i, d in enumerate(week_days):
+                        fs = FileFinder.find_journal_files(directory, date_from=d, date_to=d)
+                        if fs:
+                            all_tasks = TaskParser.parse_file(fs[0])
+                            file_paths[i] = fs[0]
+                            all_tasks_per_day[i] = all_tasks
+                            week_tasks[i] = [t for t in all_tasks if t.parent is None]
+                        else:
+                            file_paths[i] = None
+                            all_tasks_per_day[i] = []
+                            week_tasks[i] = []
+                    original_tasks_by_col = [list(col) for col in week_tasks]
+                    has_changes = False
+
             elif key == 'j':
-                tasks = week_tasks[cursor_col]
-                if tasks:
-                    cursor_row = min(cursor_row + 1, len(tasks) - 1)
+                if cursor_row == -1:
+                    cursor_row = 0
+                else:
+                    tasks = week_tasks[cursor_col]
+                    if tasks:
+                        cursor_row = min(cursor_row + 1, len(tasks) - 1)
 
             elif key == 'k':
-                cursor_row = max(cursor_row - 1, 0)
+                cursor_row = max(cursor_row - 1, -1)
 
             elif key == 'h':
                 new_col = max(cursor_col - 1, 0)
                 cursor_col = new_col
-                cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
+                if cursor_row >= 0:
+                    cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
 
             elif key == 'l':
                 new_col = min(cursor_col + 1, 6)
                 cursor_col = new_col
-                cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
+                if cursor_row >= 0:
+                    cursor_row = min(cursor_row, max(len(week_tasks[new_col]) - 1, 0))
 
             elif key == 'H' and cursor_col > 0 and week_tasks[cursor_col]:
                 cursor_row = PlannerTool._move_task_week(week_tasks, cursor_col, cursor_col - 1, cursor_row)
