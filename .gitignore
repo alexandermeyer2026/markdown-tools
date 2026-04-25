@@ -1,8 +1,10 @@
 venv/
 .venv/
+node_modules/
 __pycache__/
 *.pyc
 *.egg-info/
 dist/
-.env
+.env*
+!.env.example
 *.swp
