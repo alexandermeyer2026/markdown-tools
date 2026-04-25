@@ -1,0 +1,389 @@
+:root {
+  --bg: #0f0f17;
+  --surface: #1a1a2e;
+  --surface-hover: #22223a;
+  --border: #2a2a42;
+  --text: #e0e0f0;
+  --muted: #6b6b8a;
+  --accent: #7c7cff;
+  --accent-hover: #9999ff;
+  --danger: #ff6b6b;
+  --status-todo: #6b6b8a;
+  --status-in-progress: #7c7cff;
+  --status-done: #4caf7d;
+  --status-failed: #ff6b6b;
+  --radius: 12px;
+  --tap-target: 44px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+#root {
+  height: 100%;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+/* ── Topbar ── */
+.topbar {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 56px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.topbar-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* ── Main content ── */
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  padding-bottom: 80px;
+}
+
+.muted {
+  color: var(--muted);
+  text-align: center;
+  margin-top: 48px;
+  font-size: 0.95rem;
+}
+
+/* ── Buttons ── */
+button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+.btn-ghost {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--accent);
+  min-height: var(--tap-target);
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover {
+  background: var(--surface-hover);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-icon {
+  width: var(--tap-target);
+  height: var(--tap-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.btn-icon:hover {
+  background: var(--surface-hover);
+}
+
+.btn-danger {
+  color: var(--danger);
+}
+
+/* ── Login ── */
+.login-page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+}
+
+.login-card h1 {
+  font-size: 1.5rem;
+  margin-bottom: 24px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-card input {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+  width: 100%;
+}
+
+.login-card button[type='submit'] {
+  padding: 12px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  min-height: var(--tap-target);
+  transition: background 0.15s;
+}
+
+.login-card button[type='submit']:hover {
+  background: var(--accent-hover);
+}
+
+.login-card button[type='submit']:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 0.875rem;
+}
+
+/* ── Date grid ── */
+.date-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 480px) {
+  .date-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.date-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 12px 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  min-height: 64px;
+  transition: background 0.15s;
+}
+
+.date-card:hover {
+  background: var(--surface-hover);
+}
+
+.date-label {
+  font-size: 1rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.date-actions {
+  display: flex;
+  gap: 2px;
+}
+
+/* ── Task list ── */
+.task-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.task-item-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.task-item:hover {
+  background: var(--surface);
+}
+
+.status-btn {
+  flex-shrink: 0;
+  width: var(--tap-target);
+  height: var(--tap-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 1.1rem;
+}
+
+.status-todo .status-btn     { color: var(--status-todo); }
+.status-in-progress .status-btn { color: var(--status-in-progress); }
+.status-done .status-btn     { color: var(--status-done); }
+.status-failed .status-btn   { color: var(--status-failed); }
+.status-started .status-btn  { color: var(--muted); }
+
+.status-done .task-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.task-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.task-title {
+  font-size: 0.95rem;
+  word-break: break-word;
+  display: block;
+}
+
+.task-time {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}
+
+.task-notes {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+/* ── Add task form ── */
+.add-task-form {
+  margin-top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.add-task-form input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.form-actions button[type='submit'] {
+  flex: 1;
+  padding: 10px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  font-weight: 600;
+  min-height: var(--tap-target);
+  transition: background 0.15s;
+}
+
+.form-actions button[type='submit']:hover {
+  background: var(--accent-hover);
+}
+
+.form-actions button[type='submit']:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── FAB ── */
+.fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(124, 124, 255, 0.35);
+  z-index: 100;
+  transition: background 0.15s;
+}
+
+.fab:hover {
+  background: var(--accent-hover);
+}
+
+/* ── Focus ── */
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
