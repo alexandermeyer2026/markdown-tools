@@ -211,11 +211,29 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
             diff_mode = not diff_mode
             scroll = 0
         elif key in (ord('r'), ord('R')):
+            prompt = f" Restore {_fmt_ts(timestamps[selected])}? [y/N] "
+            try:
+                stdscr.addstr(h - 1, 0, prompt.ljust(w)[:w], curses.color_pair(5) | curses.A_BOLD)
+            except curses.error:
+                pass
+            stdscr.refresh()
+            confirm = stdscr.getch()
+            if confirm not in (ord('y'), ord('Y')):
+                continue
             from os_utils.backup_manager import BackupManager
             if os.path.exists(file_path):
                 BackupManager.backup(file_path, journal_dir)
             shutil.copy2(backup_paths[selected], file_path)
             current_lines = _read(file_path)
+            # re-scan so the newly created backup appears in the list
+            backup_dir = os.path.dirname(backup_paths[0])
+            new_backups = sorted(
+                [f for f in os.listdir(backup_dir) if f.endswith(f'_{filename}')],
+                reverse=True,
+            )
+            backup_paths = [os.path.join(backup_dir, b) for b in new_backups]
+            timestamps   = [_extract_ts(b) for b in new_backups]
+            selected     = min(selected, len(timestamps) - 1)
             msg = f" Restored {_fmt_ts(timestamps[selected])} — press any key "
             try:
                 stdscr.addstr(h - 1, 0, msg.ljust(w)[:w], curses.color_pair(3) | curses.A_BOLD)
