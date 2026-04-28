@@ -5,7 +5,7 @@ from datetime import datetime
 
 class BackupManager:
     BACKUP_DIR = '.backups'
-    MAX_BACKUPS_PER_FILE = 5
+    MAX_BACKUPS_PER_FILE = 10
 
     @staticmethod
     def backup(file_path: str, working_dir: str) -> None:
