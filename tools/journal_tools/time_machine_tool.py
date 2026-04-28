@@ -102,6 +102,7 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
     selected  = 0
     scroll    = 0
     diff_mode = False
+    focus     = 'left'   # 'left' | 'right'
     LEFT_W    = max(22, len(f" Time Machine: {filename} "))
 
     current_lines = _read(file_path) if os.path.exists(file_path) else []
@@ -125,10 +126,12 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
         # ── header ────────────────────────────────────────────────────────────
         left_header  = f" Time Machine: {filename} ".ljust(LEFT_W)[:LEFT_W]
         right_header = panel_title.ljust(right_w)[:right_w]
+        left_attr  = (curses.color_pair(1) | curses.A_BOLD) if focus == 'left'  else curses.color_pair(1)
+        right_attr = (curses.color_pair(1) | curses.A_BOLD) if focus == 'right' else curses.color_pair(1)
         try:
-            stdscr.addstr(0, 0,       left_header,  curses.color_pair(1) | curses.A_BOLD)
-            stdscr.addstr(0, LEFT_W,  '│',           curses.color_pair(1) | curses.A_BOLD)
-            stdscr.addstr(0, right_x, right_header,  curses.color_pair(1) | curses.A_BOLD)
+            stdscr.addstr(0, 0,       left_header,  left_attr)
+            stdscr.addstr(0, LEFT_W,  '│',           curses.color_pair(1))
+            stdscr.addstr(0, right_x, right_header,  right_attr)
         except curses.error:
             pass
 
@@ -172,9 +175,12 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
 
         # ── status bar ────────────────────────────────────────────────────────
         d_hint = "[d] content" if diff_mode else "[d] diff"
-        status = f"  [j/k] navigate  {d_hint}  [r] restore  [q] quit  ({selected + 1}/{len(timestamps)})"
+        if focus == 'left':
+            hints = f"[j/k] version  [l] →content  {d_hint}  [r] restore  [q] quit  ({selected + 1}/{len(timestamps)})"
+        else:
+            hints = f"[h] →versions  [j/k] scroll  {d_hint}  [r] restore  [q] quit"
         try:
-            stdscr.addstr(h - 2, 0, status.ljust(w)[:w], curses.color_pair(6))
+            stdscr.addstr(h - 2, 0, f"  {hints}".ljust(w)[:w], curses.color_pair(6))
         except curses.error:
             pass
 
@@ -185,19 +191,25 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
 
         if key in (ord('q'), ord('Q'), 27):
             break
-        elif key == ord('k') and selected > 0:
-            selected -= 1
-            scroll = 0
-        elif key == ord('j') and selected < len(timestamps) - 1:
-            selected += 1
-            scroll = 0
+        elif key == ord('l') and focus == 'left':
+            focus = 'right'
+        elif key == ord('h') and focus == 'right':
+            focus = 'left'
+        elif key == ord('k'):
+            if focus == 'left' and selected > 0:
+                selected -= 1
+                scroll = 0
+            elif focus == 'right':
+                scroll = max(0, scroll - 1)
+        elif key == ord('j'):
+            if focus == 'left' and selected < len(timestamps) - 1:
+                selected += 1
+                scroll = 0
+            elif focus == 'right':
+                scroll = min(scroll + 1, max(0, len(display) - content_h))
         elif key in (ord('d'), ord('D')):
             diff_mode = not diff_mode
             scroll = 0
-        elif key in (curses.KEY_NPAGE, ord(' ')):
-            scroll = min(scroll + content_h - 1, max(0, len(display) - 1))
-        elif key == curses.KEY_PPAGE:
-            scroll = max(0, scroll - (content_h - 1))
         elif key in (ord('r'), ord('R')):
             from os_utils.backup_manager import BackupManager
             if os.path.exists(file_path):
