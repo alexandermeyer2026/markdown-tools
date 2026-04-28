@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 from os_utils import FileFinder
-from tools.journal_tools import CatchUpTool, PlannerTool, SyncTool, TimelineTool, UpdateTool
+from tools.journal_tools import CatchUpTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool, UpdateTool
 
 
 def _is_date(date_string: str) -> bool:
@@ -57,7 +57,8 @@ def main():
         'catch-up': lambda a: CatchUpTool.run(a, journal_dir),
         'planner':  lambda a: PlannerTool.run(a, journal_dir),
         'update':   lambda a: UpdateTool.run(a, journal_dir),
-        'sync':     lambda a: SyncTool.run(a, journal_dir),
+        'sync':         lambda a: SyncTool.run(a, journal_dir),
+        'time-machine': lambda a: TimeMachineTool.run(a, journal_dir),
     }
 
     if sub in subcommands:
