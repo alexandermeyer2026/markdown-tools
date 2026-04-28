@@ -18,8 +18,12 @@ export default function Login() {
       const { data } = await api.post('/auth/login', { password })
       login(data.access_token)
       navigate('/', { replace: true })
-    } catch {
-      setError('Invalid password')
+    } catch (err: any) {
+      if (err?.response?.status === 429) {
+        setError('Too many attempts, try again later')
+      } else {
+        setError('Invalid password')
+      }
     } finally {
       setLoading(false)
     }
