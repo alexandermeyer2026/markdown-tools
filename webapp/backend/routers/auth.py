@@ -1,6 +1,8 @@
 import os
+import threading
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import bcrypt
@@ -8,6 +10,22 @@ import jwt
 
 router = APIRouter()
 _security = HTTPBearer()
+
+_rate_lock = threading.Lock()
+_attempts: dict[str, list[datetime]] = defaultdict(list)
+
+_WINDOW = 60   # seconds
+_MAX = 5       # attempts per window
+
+
+def _check_rate_limit(ip: str) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=_WINDOW)
+    with _rate_lock:
+        _attempts[ip] = [t for t in _attempts[ip] if t > cutoff]
+        if len(_attempts[ip]) >= _MAX:
+            raise HTTPException(status_code=429, detail="Too many login attempts, try again later")
+        _attempts[ip].append(now)
 
 
 class LoginRequest(BaseModel):
@@ -48,7 +66,8 @@ def get_current_user(
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(req: LoginRequest):
+def login(req: LoginRequest, request: Request):
+    _check_rate_limit(request.client.host)
     password_hash = os.getenv("PASSWORD_HASH", "")
     if not password_hash:
         raise HTTPException(status_code=500, detail="Server not configured: PASSWORD_HASH missing")
