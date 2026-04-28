@@ -1,5 +1,6 @@
 import curses
 import os
+import re
 import shutil
 import sys
 from datetime import datetime as dt
@@ -44,18 +45,28 @@ class TimeMachineTool:
             sys.exit(1)
 
         backup_paths = [os.path.join(backup_dir, b) for b in backups]
-        timestamps = [b[:26] for b in backups]  # 'YYYY-MM-DDTHH:MM:SS.ffffff'
+        timestamps = [_extract_ts(b) for b in backups]
 
         curses.wrapper(_browse, file_path, filename, backup_paths, timestamps, journal_dir)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_TS_RE = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?')
+
+
+def _extract_ts(backup_name: str) -> str:
+    m = _TS_RE.match(backup_name)
+    return m.group() if m else backup_name
+
+
 def _fmt_ts(ts: str) -> str:
-    try:
-        return dt.strptime(ts, '%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d  %H:%M:%S')
-    except ValueError:
-        return ts
+    for fmt in ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S'):
+        try:
+            return dt.strptime(ts, fmt).strftime('%Y-%m-%d  %H:%M:%S')
+        except ValueError:
+            continue
+    return ts
 
 
 def _read(path: str) -> list[str]:
@@ -88,10 +99,10 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
     curses.init_pair(5, curses.COLOR_YELLOW, -1)                         # diff hunk
     curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)           # status bar
 
-    selected   = 0
-    scroll     = 0
-    diff_mode  = False
-    LEFT_W     = 22
+    selected  = 0
+    scroll    = 0
+    diff_mode = False
+    LEFT_W    = max(22, len(f" Time Machine: {filename} "))
 
     current_lines = _read(file_path) if os.path.exists(file_path) else []
 
@@ -102,10 +113,22 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
         right_w = w - right_x
         content_h = h - 3  # rows between header and status bar
 
+        # ── right panel: content or diff (computed early for header) ────────────
+        selected_lines = _read(backup_paths[selected])
+        if diff_mode:
+            display = _diff(current_lines, selected_lines)
+            panel_title = " diff vs current "
+        else:
+            display = [l.rstrip('\n') for l in selected_lines]
+            panel_title = f" {_fmt_ts(timestamps[selected])} "
+
         # ── header ────────────────────────────────────────────────────────────
-        header = f" Time Machine: {filename} "
+        left_header  = f" Time Machine: {filename} ".ljust(LEFT_W)[:LEFT_W]
+        right_header = panel_title.ljust(right_w)[:right_w]
         try:
-            stdscr.addstr(0, 0, header.ljust(w)[:w], curses.color_pair(1) | curses.A_BOLD)
+            stdscr.addstr(0, 0,       left_header,  curses.color_pair(1) | curses.A_BOLD)
+            stdscr.addstr(0, LEFT_W,  '│',           curses.color_pair(1) | curses.A_BOLD)
+            stdscr.addstr(0, right_x, right_header,  curses.color_pair(1) | curses.A_BOLD)
         except curses.error:
             pass
 
@@ -114,7 +137,7 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
             row = 1 + i
             if row > content_h:
                 break
-            label = f" {_fmt_ts(ts)[:16]}"
+            label = f" {_fmt_ts(ts)}"
             attr  = curses.color_pair(2) if i == selected else 0
             try:
                 stdscr.addstr(row, 0, label.ljust(LEFT_W)[:LEFT_W], attr)
@@ -128,20 +151,7 @@ def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
             except curses.error:
                 pass
 
-        # ── right panel: content or diff ──────────────────────────────────────
-        selected_lines = _read(backup_paths[selected])
-        if diff_mode:
-            display = _diff(current_lines, selected_lines)
-            panel_title = f" diff vs current "
-        else:
-            display = [l.rstrip('\n') for l in selected_lines]
-            panel_title = f" {_fmt_ts(timestamps[selected])} "
-
-        try:
-            stdscr.addstr(0, right_x, panel_title[:right_w], curses.color_pair(1) | curses.A_BOLD)
-        except curses.error:
-            pass
-
+        # ── right panel: content ─────────────────────────────────────────────
         for i, line in enumerate(display[scroll: scroll + content_h]):
             row = 1 + i
             if diff_mode:
