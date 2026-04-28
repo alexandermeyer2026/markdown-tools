@@ -1,19 +1,43 @@
 import curses
+import datetime
 import os
+import re
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime as dt
+
+from os_utils import FileFinder
+
+_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_DATE_ALIASES = {'today', 'yesterday', 'tomorrow'}
+
+
+def _resolve_file(arg: str, journal_dir: str) -> str:
+    """Resolve a file path, date alias, or YYYY-MM-DD string to an absolute path."""
+    lowered = arg.lower()
+    if lowered in _DATE_ALIASES or _DATE_RE.match(arg):
+        today = datetime.date.today()
+        match lowered:
+            case 'today':     date = today
+            case 'yesterday': date = today - datetime.timedelta(days=1)
+            case 'tomorrow':  date = today + datetime.timedelta(days=1)
+            case _:           date = datetime.datetime.strptime(arg, '%Y-%m-%d').date()
+        files = FileFinder.find_journal_files(journal_dir, date_from=date, date_to=date)
+        if not files:
+            print(f"No journal file found for {date}")
+            sys.exit(1)
+        return files[0]
+    return arg if os.path.isabs(arg) else os.path.join(journal_dir, arg)
 
 
 class TimeMachineTool:
     @staticmethod
     def run(args: list[str], journal_dir: str) -> None:
         if not args:
-            print("Usage: journal time-machine <file>")
+            print("Usage: journal time-machine <file|date>")
             sys.exit(1)
 
-        file_arg = args[0]
-        file_path = file_arg if os.path.isabs(file_arg) else os.path.join(journal_dir, file_arg)
+        file_path = _resolve_file(args[0], journal_dir)
         filename = os.path.basename(file_path)
         backup_dir = os.path.join(journal_dir, '.backups')
 
@@ -40,8 +64,7 @@ class TimeMachineTool:
 
 def _fmt_ts(ts: str) -> str:
     try:
-        dt = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%S.%f')
-        return dt.strftime('%Y-%m-%d  %H:%M:%S')
+        return dt.strptime(ts, '%Y-%m-%dT%H:%M:%S.%f').strftime('%Y-%m-%d  %H:%M:%S')
     except ValueError:
         return ts
 
