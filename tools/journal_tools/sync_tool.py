@@ -1,13 +1,13 @@
 import datetime
 import json
-import re
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+from os_utils import resolve_date
+
 _CONFIG_PATH = Path.home() / '.journal_sync.json'
-_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
 def _load_config() -> dict:
@@ -23,19 +23,11 @@ def _save_config(config: dict) -> None:
 
 
 def _resolve_date(date_string: str) -> datetime.date:
-    today = datetime.date.today()
-    match date_string.lower():
-        case 'today':
-            return today
-        case 'tomorrow':
-            return today + datetime.timedelta(days=1)
-        case 'yesterday':
-            return today - datetime.timedelta(days=1)
-        case _:
-            if not _DATE_RE.match(date_string):
-                print(f"Invalid date: {date_string}. Use today/yesterday/tomorrow or YYYY-MM-DD.")
-                sys.exit(1)
-            return datetime.datetime.strptime(date_string, '%Y-%m-%d').date()
+    date = resolve_date(date_string)
+    if date is None:
+        print(f"Invalid date: {date_string}. Use today/yesterday/tomorrow or YYYY-MM-DD.")
+        sys.exit(1)
+    return date
 
 
 def _request(method: str, url: str, token: str, body: bytes = None, content_type: str = None):

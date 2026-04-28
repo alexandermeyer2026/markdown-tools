@@ -1,32 +1,13 @@
-import datetime
 import os
-import re
 import subprocess
 import sys
 
-from os_utils import FileFinder
+from os_utils import FileFinder, resolve_date
 from tools.journal_tools import CatchUpTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool, UpdateTool
 
 
-def _is_date(date_string: str) -> bool:
-    return bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_string))
-
-
-def _get_date(date_string: str) -> datetime.date:
-    today = datetime.date.today()
-    match date_string.lower():
-        case 'today':
-            return today
-        case 'tomorrow':
-            return today + datetime.timedelta(days=1)
-        case 'yesterday':
-            return today - datetime.timedelta(days=1)
-        case _:
-            return datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
-
-
 def _open_journal_for_date(date_string: str, directory: str) -> None:
-    date = _get_date(date_string)
+    date = resolve_date(date_string)
     journal_files = FileFinder.find_journal_files(directory, date_from=date, date_to=date)
     if journal_files:
         subprocess.run(['vim', journal_files[0]])
@@ -63,7 +44,7 @@ def main():
 
     if sub in subcommands:
         subcommands[sub](args[2:])
-    elif sub in ('today', 'tomorrow', 'yesterday') or _is_date(sub):
+    elif resolve_date(sub) is not None:
         _open_journal_for_date(sub, journal_dir)
     else:
         print(f"Unknown subcommand: {sub}")

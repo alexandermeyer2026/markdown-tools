@@ -1,10 +1,9 @@
 import datetime
 import os
-import re
 import shutil
 
 from models import Task
-from os_utils import FileFinder
+from os_utils import FileFinder, resolve_date
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, RESET,
@@ -23,16 +22,7 @@ class TimelineTool:
         input_file = args[0]
         basename = os.path.basename(input_file)
 
-        if basename.lower() == 'today':
-            date = datetime.date.today()
-        elif basename.lower() == 'tomorrow':
-            date = datetime.date.today() + datetime.timedelta(days=1)
-        elif basename.lower() == 'yesterday':
-            date = datetime.date.today() - datetime.timedelta(days=1)
-        elif re.fullmatch(r'\d{4}-\d{2}-\d{2}', basename):
-            date = datetime.datetime.strptime(basename, '%Y-%m-%d').date()
-        else:
-            date = FileFinder.get_journal_file_date(input_file)
+        date = resolve_date(basename) or FileFinder.get_journal_file_date(input_file)
 
         if date:
             directory = os.path.dirname(input_file) or directory

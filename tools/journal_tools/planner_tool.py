@@ -1,13 +1,12 @@
 import datetime
 import os
-import re
 import shutil
 import sys
 import termios
 import tty
 
 from models import Task, TaskTime, top_level_tasks
-from os_utils import BackupManager, FileFinder, FileWriter
+from os_utils import BackupManager, FileFinder, FileWriter, resolve_date
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RESET,
@@ -32,16 +31,7 @@ class PlannerTool:
         input_arg = args[0]
         basename = os.path.basename(input_arg)
 
-        if basename.lower() == 'today':
-            date = datetime.date.today()
-        elif basename.lower() == 'tomorrow':
-            date = datetime.date.today() + datetime.timedelta(days=1)
-        elif basename.lower() == 'yesterday':
-            date = datetime.date.today() - datetime.timedelta(days=1)
-        elif re.fullmatch(r'\d{4}-\d{2}-\d{2}', basename):
-            date = datetime.datetime.strptime(basename, '%Y-%m-%d').date()
-        else:
-            date = FileFinder.get_journal_file_date(input_arg)
+        date = resolve_date(basename) or FileFinder.get_journal_file_date(input_arg)
 
         if date:
             directory = os.path.dirname(input_arg) or directory

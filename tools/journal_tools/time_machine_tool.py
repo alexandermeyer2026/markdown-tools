@@ -1,27 +1,16 @@
 import curses
-import datetime
 import os
-import re
 import shutil
 import sys
 from datetime import datetime as dt
 
-from os_utils import FileFinder
-
-_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
-_DATE_ALIASES = {'today', 'yesterday', 'tomorrow'}
+from os_utils import FileFinder, resolve_date
 
 
 def _resolve_file(arg: str, journal_dir: str) -> str:
     """Resolve a file path, date alias, or YYYY-MM-DD string to an absolute path."""
-    lowered = arg.lower()
-    if lowered in _DATE_ALIASES or _DATE_RE.match(arg):
-        today = datetime.date.today()
-        match lowered:
-            case 'today':     date = today
-            case 'yesterday': date = today - datetime.timedelta(days=1)
-            case 'tomorrow':  date = today + datetime.timedelta(days=1)
-            case _:           date = datetime.datetime.strptime(arg, '%Y-%m-%d').date()
+    date = resolve_date(arg)
+    if date is not None:
         files = FileFinder.find_journal_files(journal_dir, date_from=date, date_to=date)
         if not files:
             print(f"No journal file found for {date}")
