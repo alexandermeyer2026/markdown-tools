@@ -12,7 +12,7 @@ import pytest
 
 from models import Task, TaskTime, minutes_to_time
 from parser.task_parser import TaskParser
-from tools.journal_tools.planner_tool import PlannerTool
+from tools.journal_tools.planner_tool import PlannerTool, WeekState
 
 JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
@@ -262,18 +262,24 @@ class PlannerIntegrationTest(unittest.TestCase):
 class TestInteractiveWeekNavigation(unittest.TestCase):
     MONDAY = datetime.date(2024, 1, 15)  # a known Monday
 
-    def _make_args(self, start_col=None, tasks_by_col=None):
+    def _make_state(self, tasks_by_col=None):
         week_days = [self.MONDAY + datetime.timedelta(days=i) for i in range(7)]
         week_tasks = tasks_by_col if tasks_by_col is not None else [[] for _ in range(7)]
-        return week_days, week_tasks, [None] * 7, [[] for _ in range(7)], '/tmp'
+        return WeekState(
+            week_days=week_days,
+            week_tasks=week_tasks,
+            file_paths=[None] * 7,
+            all_tasks_per_day=[[] for _ in range(7)],
+            directory='/tmp',
+        )
 
     def _run(self, keys, start_col=None, tasks_by_col=None, inputs=None):
-        args = self._make_args(start_col=start_col, tasks_by_col=tasks_by_col)
+        state = self._make_state(tasks_by_col=tasks_by_col)
         with patch.object(PlannerTool, 'read_key', side_effect=keys):
             with patch.object(PlannerTool, 'render_week'):
                 with patch('builtins.input', side_effect=inputs or []):
                     with patch('sys.stdout'):
-                        return PlannerTool.interactive_week(*args, start_col=start_col)
+                        return PlannerTool.interactive_week(state, start_col=start_col)
 
     def test_quit_returns_zero(self):
         self.assertEqual(self._run(['q']), 0)
