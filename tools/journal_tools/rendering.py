@@ -41,13 +41,16 @@ def scale_lines(step_size_hours: float, first_slot: int, now_slot: int | None) -
     return (hours + '24')[first_slot:], scale[first_slot:]
 
 
-def subtask_rows(task: Task, left_pad: int = 0, depth: int = 1) -> list[str]:
+def subtask_rows(task: Task, left_pad: int = 0, depth: int = 1, selected_task=None) -> list[str]:
     rows = []
     for child in task.children:
         indent = ' ' * left_pad + '  ' * depth
         icon = STATUS_ICONS.get(child.status, '?')
-        rows.append(f"{indent}{GRAY}{icon} {child.title}{RESET}")
-        rows.extend(subtask_rows(child, left_pad, depth + 1))
+        if child is selected_task:
+            rows.append(f"{indent[:-2]}\x1b[7m> {icon} {child.title}{RESET}")
+        else:
+            rows.append(f"{indent}{GRAY}{icon} {child.title}{RESET}")
+        rows.extend(subtask_rows(child, left_pad, depth + 1, selected_task))
     return rows
 
 

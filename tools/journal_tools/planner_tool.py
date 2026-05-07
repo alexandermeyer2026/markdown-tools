@@ -116,15 +116,21 @@ class PlannerTool:
         return 2 + (start_slot - first_slot) + bar_width + 1 + len(task.time.to_str()) + 1
 
     @staticmethod
-    def render(file_path, timed_tasks, untimed_tasks, cursor_idx,
+    def _flatten_tasks(tasks: list) -> list:
+        result = []
+        for task in tasks:
+            result.append(task)
+            result.extend(PlannerTool._flatten_tasks(task.children))
+        return result
+
+    @staticmethod
+    def render(file_path, timed_tasks, untimed_tasks, selected_task,
                step_size_hours, directory, has_changes, date):
         lines = []
 
         rel_path = os.path.relpath(file_path, directory)
         marker = ' *' if has_changes else ''
         lines.append(f"  {BOLD}Planning: {rel_path}{marker}{RESET}\n")
-
-        all_tasks = timed_tasks + untimed_tasks
 
         if timed_tasks:
             first_slot = 0
@@ -138,19 +144,19 @@ class PlannerTool:
             lines.append('  ' + hours_line)
             lines.append('  ' + scale_line)
 
-            for i, task in enumerate(timed_tasks):
-                lines.append(PlannerTool._task_row(task, step_size_hours, first_slot, cursor_idx == i))
-                lines.extend(subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, first_slot)))
+            for task in timed_tasks:
+                lines.append(PlannerTool._task_row(task, step_size_hours, first_slot, task is selected_task))
+                lines.extend(subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, first_slot), selected_task=selected_task))
         else:
             lines.append(f"  {GRAY}No timed tasks yet{RESET}")
 
         if untimed_tasks:
             lines.append(f"\n  {GRAY}── Unscheduled {'─' * 50}{RESET}")
-            for j, task in enumerate(untimed_tasks):
-                lines.append(PlannerTool._task_row(task, step_size_hours, 0, cursor_idx == len(timed_tasks) + j))
-                lines.extend(subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, 0)))
+            for task in untimed_tasks:
+                lines.append(PlannerTool._task_row(task, step_size_hours, 0, task is selected_task))
+                lines.extend(subtask_rows(task, left_pad=PlannerTool._icon_col(task, step_size_hours, 0), selected_task=selected_task))
 
-        if not all_tasks:
+        if not timed_tasks and not untimed_tasks:
             lines.append(f"\n  {GRAY}No tasks. Press n to add one.{RESET}")
 
         lines.append(f"\n  {GRAY}[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  [n] new  [t/i/d/f] status  [q] quit{RESET}")
@@ -445,7 +451,7 @@ class PlannerTool:
     def _has_changes(timed_tasks, untimed_tasks, original_lines, new_tasks) -> bool:
         if new_tasks:
             return True
-        for task in timed_tasks + untimed_tasks:
+        for task in PlannerTool._flatten_tasks(timed_tasks + untimed_tasks):
             if task.line_number > 0 and task.line_number in original_lines:
                 if original_lines[task.line_number] != task.to_line():
                     return True
@@ -458,7 +464,7 @@ class PlannerTool:
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        for task in timed_tasks + untimed_tasks:
+        for task in PlannerTool._flatten_tasks(timed_tasks + untimed_tasks):
             if task.line_number in original_lines and original_lines[task.line_number] != task.to_line():
                 lines[task.line_number - 1] = task.to_line() + '\n'
 
@@ -483,7 +489,7 @@ class PlannerTool:
 
     @staticmethod
     def interactive_plan(directory, file_path, tasks, date=None):
-        step  = PlannerTool.STEP_SIZE_HOURS
+        step   = PlannerTool.STEP_SIZE_HOURS
         step_m = int(step * 60)
 
         timed_tasks   = sorted([t for t in tasks if t.time and t.parent is None],
@@ -495,9 +501,10 @@ class PlannerTool:
         cursor_idx = 0
 
         while True:
-            all_tasks   = timed_tasks + untimed_tasks
+            navigable   = PlannerTool._flatten_tasks(timed_tasks + untimed_tasks)
+            selected    = navigable[cursor_idx] if navigable else None
             has_changes = PlannerTool._has_changes(timed_tasks, untimed_tasks, original_lines, new_tasks)
-            PlannerTool.render(file_path, timed_tasks, untimed_tasks, cursor_idx,
+            PlannerTool.render(file_path, timed_tasks, untimed_tasks, selected,
                                step, directory, has_changes, date)
 
             key = PlannerTool.read_key()
@@ -514,80 +521,74 @@ class PlannerTool:
                 break
 
             elif key == 'j':
-                if all_tasks:
-                    cursor_idx = min(cursor_idx + 1, len(all_tasks) - 1)
+                if navigable:
+                    cursor_idx = min(cursor_idx + 1, len(navigable) - 1)
 
             elif key == 'k':
                 cursor_idx = max(cursor_idx - 1, 0)
 
             elif key in ('h', 'l'):
-                if not all_tasks:
+                if not navigable or selected.parent is not None:
                     continue
-                task = all_tasks[cursor_idx]
                 direction = -1 if key == 'h' else 1
 
-                if task.time is None:
-                    task.time = TaskTime(start='12:00')
-                    untimed_tasks.remove(task)
-                    timed_tasks.append(task)
+                if selected.time is None:
+                    selected.time = TaskTime(start='12:00')
+                    untimed_tasks.remove(selected)
+                    timed_tasks.append(selected)
                     timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
-                    cursor_idx = timed_tasks.index(task)
                 else:
-                    start_m = get_minutes(task.time.start)
-                    if task.time.end:
-                        end_m    = get_minutes(task.time.end)
+                    start_m = get_minutes(selected.time.start)
+                    if selected.time.end:
+                        end_m    = get_minutes(selected.time.end)
                         duration = end_m - start_m
                         new_start = max(0, min(start_m + direction * step_m, 24 * 60 - duration))
-                        task.time = TaskTime(
+                        selected.time = TaskTime(
                             start=minutes_to_time(new_start),
                             end=minutes_to_time(new_start + duration),
                         )
                     else:
                         new_start = max(0, min(start_m + direction * step_m, 23 * 60 + 30))
-                        task.time = TaskTime(start=minutes_to_time(new_start))
+                        selected.time = TaskTime(start=minutes_to_time(new_start))
                     timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
-                    cursor_idx = timed_tasks.index(task)
+                navigable  = PlannerTool._flatten_tasks(timed_tasks + untimed_tasks)
+                cursor_idx = next(i for i, t in enumerate(navigable) if t is selected)
 
             elif key == 'H':  # shrink: move end time earlier
-                if not all_tasks:
+                if not navigable or selected.parent is not None:
                     continue
-                task = all_tasks[cursor_idx]
-                if task.time and task.time.end:
-                    start_m = get_minutes(task.time.start)
-                    end_m   = get_minutes(task.time.end)
+                if selected.time and selected.time.end:
+                    start_m = get_minutes(selected.time.start)
+                    end_m   = get_minutes(selected.time.end)
                     new_end = end_m - step_m
                     if new_end > start_m:
-                        task.time = TaskTime(start=task.time.start,
-                                             end=minutes_to_time(new_end))
+                        selected.time = TaskTime(start=selected.time.start,
+                                                 end=minutes_to_time(new_end))
                     else:
-                        task.time = TaskTime(start=task.time.start)
+                        selected.time = TaskTime(start=selected.time.start)
 
             elif key == 'L':  # extend: move end time later
-                if not all_tasks:
+                if not navigable or selected.parent is not None:
                     continue
-                task = all_tasks[cursor_idx]
-                if task.time:
-                    if task.time.end:
-                        end_m   = get_minutes(task.time.end)
-                        new_end = min(end_m + step_m, 24 * 60)
+                if selected.time:
+                    if selected.time.end:
+                        new_end = min(get_minutes(selected.time.end) + step_m, 24 * 60)
                     else:
-                        start_m = get_minutes(task.time.start)
-                        new_end = min(start_m + step_m, 24 * 60)
-                    task.time = TaskTime(start=task.time.start,
-                                         end=minutes_to_time(new_end))
+                        new_end = min(get_minutes(selected.time.start) + step_m, 24 * 60)
+                    selected.time = TaskTime(start=selected.time.start,
+                                             end=minutes_to_time(new_end))
 
             elif key in ('t', 'i', 'd', 'f'):
-                if all_tasks:
-                    all_tasks[cursor_idx].status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
+                if selected:
+                    selected.status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
 
             elif key == 'r':
-                if all_tasks:
-                    task = all_tasks[cursor_idx]
-                    if task.time and task in timed_tasks:
-                        task.time = None
-                        timed_tasks.remove(task)
-                        untimed_tasks.insert(0, task)
-                        cursor_idx = min(cursor_idx, len(timed_tasks + untimed_tasks) - 1)
+                if navigable and selected.parent is None:
+                    if selected.time and selected in timed_tasks:
+                        selected.time = None
+                        timed_tasks.remove(selected)
+                        untimed_tasks.insert(0, selected)
+                        cursor_idx = min(cursor_idx, len(PlannerTool._flatten_tasks(timed_tasks + untimed_tasks)) - 1)
 
             elif key == 'n':
                 sys.stdout.write('\x1b[2J\x1b[H')
@@ -597,4 +598,4 @@ class PlannerTool:
                     new_task = Task(title=title, status='todo', time=None, line_number=-1, indent='')
                     untimed_tasks.append(new_task)
                     new_tasks.append(new_task)
-                    cursor_idx = len(timed_tasks) + len(untimed_tasks) - 1
+                    cursor_idx = len(PlannerTool._flatten_tasks(timed_tasks + untimed_tasks)) - 1

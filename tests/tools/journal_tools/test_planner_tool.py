@@ -259,6 +259,76 @@ class PlannerIntegrationTest(unittest.TestCase):
         self._run_fixture('week_move_and_sort')
 
 
+class TestInteractivePlanSubtasks(unittest.TestCase):
+    CONTENT = (
+        "# Journal\n"
+        "\n"
+        "- [ ] Buy milk\n"
+        "  - [ ] Sub task\n"
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False, encoding='utf-8'
+        )
+        self.tmp.write(self.CONTENT)
+        self.tmp.close()
+        self.path = self.tmp.name
+        self.directory = os.path.dirname(self.path)
+        self.tasks = TaskParser.parse_file(self.path)
+
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def _run(self, keys, inputs=None):
+        captured = {}
+
+        def capture_save(file_path, directory, timed, untimed, orig, new):
+            captured['timed']   = list(timed)
+            captured['untimed'] = list(untimed)
+            captured['new']     = list(new)
+
+        with patch.object(PlannerTool, 'read_key', side_effect=keys):
+            with patch.object(PlannerTool, 'render'):
+                with patch('builtins.input', side_effect=inputs or []):
+                    with patch.object(PlannerTool, '_save', side_effect=capture_save):
+                        PlannerTool.interactive_plan(self.directory, self.path, self.tasks)
+
+        return captured
+
+    def test_j_navigates_into_subtask(self):
+        # j moves to subtask; d changes its status; save captures the parent with updated child
+        result = self._run(['j', 'd', 'q'], inputs=['y'])
+        parent = result['untimed'][0]
+        self.assertEqual(parent.children[0].status, 'done')
+
+    def test_k_navigates_out_of_subtask(self):
+        # j then k returns to parent; status change applies to parent, not subtask
+        result = self._run(['j', 'k', 'd', 'q'], inputs=['y'])
+        parent = result['untimed'][0]
+        self.assertEqual(parent.status, 'done')
+        self.assertEqual(parent.children[0].status, 'todo')
+
+    def test_h_on_subtask_is_noop(self):
+        # j enters subtask; h should be a no-op (no time assigned, no change recorded)
+        result = self._run(['j', 'h', 'q'])
+        self.assertEqual(result, {})
+
+    def test_l_on_subtask_is_noop(self):
+        result = self._run(['j', 'l', 'q'])
+        self.assertEqual(result, {})
+
+    def test_subtask_status_change_detected_as_has_changes(self):
+        # Verify _has_changes picks up a subtask status mutation
+        parent = self.tasks[0]
+        child  = self.tasks[1]
+        original_lines = {t.line_number: t.to_line() for t in self.tasks}
+        self.assertFalse(PlannerTool._has_changes([parent], [], original_lines, []))
+        child.status = 'done'
+        self.assertTrue(PlannerTool._has_changes([parent], [], original_lines, []))
+
+
 class TestInteractiveWeekNavigation(unittest.TestCase):
     MONDAY = datetime.date(2024, 1, 15)  # a known Monday
 
