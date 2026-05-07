@@ -256,7 +256,7 @@ class PlannerTool:
                     line += ' ' * col_width
             lines.append(line)
 
-        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [h on Mon / l on Sun] switch week  [H/L] move task  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
+        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
 
         padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
         sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
