@@ -257,3 +257,57 @@ class PlannerIntegrationTest(unittest.TestCase):
 
     def test_week_move_and_sort(self):
         self._run_fixture('week_move_and_sort')
+
+
+class TestInteractiveWeekNavigation(unittest.TestCase):
+    MONDAY = datetime.date(2024, 1, 15)  # a known Monday
+
+    def _make_args(self, start_col=None, tasks_by_col=None):
+        week_days = [self.MONDAY + datetime.timedelta(days=i) for i in range(7)]
+        week_tasks = tasks_by_col if tasks_by_col is not None else [[] for _ in range(7)]
+        return week_days, week_tasks, [None] * 7, [[] for _ in range(7)], '/tmp'
+
+    def _run(self, keys, start_col=None, tasks_by_col=None, inputs=None):
+        args = self._make_args(start_col=start_col, tasks_by_col=tasks_by_col)
+        with patch.object(PlannerTool, 'read_key', side_effect=keys):
+            with patch.object(PlannerTool, 'render_week'):
+                with patch('builtins.input', side_effect=inputs or []):
+                    with patch('sys.stdout'):
+                        return PlannerTool.interactive_week(*args, start_col=start_col)
+
+    def test_quit_returns_zero(self):
+        self.assertEqual(self._run(['q']), 0)
+
+    def test_h_on_monday_returns_minus_one(self):
+        self.assertEqual(self._run(['h'], start_col=0), -1)
+
+    def test_l_on_sunday_returns_one(self):
+        self.assertEqual(self._run(['l'], start_col=6), 1)
+
+    def test_h_not_on_monday_moves_left_stays_in_week(self):
+        result = self._run(['h', 'q'], start_col=2)
+        self.assertEqual(result, 0)
+
+    def test_l_not_on_sunday_moves_right_stays_in_week(self):
+        result = self._run(['l', 'q'], start_col=4)
+        self.assertEqual(result, 0)
+
+    def test_h_on_monday_with_changes_prompts_and_returns_minus_one(self):
+        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
+        tasks_by_col = [[task]] + [[] for _ in range(6)]
+        # 'd' marks task done (has_changes=True), then 'h' on Monday triggers save prompt
+        result = self._run(['d', 'h'], start_col=0, tasks_by_col=tasks_by_col, inputs=['n'])
+        self.assertEqual(result, -1)
+
+    def test_l_on_sunday_with_changes_prompts_and_returns_one(self):
+        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
+        tasks_by_col = [[] for _ in range(6)] + [[task]]
+        result = self._run(['d', 'l'], start_col=6, tasks_by_col=tasks_by_col, inputs=['n'])
+        self.assertEqual(result, 1)
+
+    def test_default_cursor_lands_on_first_day_with_tasks(self):
+        task = Task(title='Task', status='todo', time=None, line_number=1, indent='')
+        tasks_by_col = [[], [], [task]] + [[] for _ in range(4)]
+        # cursor should start at col 2; pressing h twice lands on col 0; one more h switches week
+        result = self._run(['h', 'h', 'h'], tasks_by_col=tasks_by_col)
+        self.assertEqual(result, -1)
