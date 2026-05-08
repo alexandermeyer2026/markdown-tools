@@ -17,15 +17,22 @@ from tools.journal_tools.rendering import (
 
 
 @dataclass
+class DayCache:
+    file_path: str | None
+    all_tasks: list          # original flat parse (for cut operations)
+    task_list: list          # current top-level tasks (mutable, shared with WeekState)
+    original_task_list: list # snapshot at load time (for change detection)
+    original_lines: dict     # {line_number: original to_line()} for status detection
+
+
+@dataclass
 class WeekState:
     week_days: list
-    week_tasks: list
+    week_tasks: list         # list references into cache DayCache.task_list
     file_paths: list
     all_tasks_per_day: list
     directory: str
-    original_tasks_by_col: list = field(default_factory=list)
-    status_changed: set = field(default_factory=set)
-    has_changes: bool = False
+    cache: dict              # date ISO string -> DayCache
 
 
 class PlannerTool:
@@ -171,40 +178,172 @@ class PlannerTool:
     DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
     @staticmethod
+    def _ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCache:
+        key = day.isoformat()
+        if key not in cache:
+            files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
+            if files:
+                all_tasks = TaskParser.parse_file(files[0])
+                tl = list(top_level_tasks(all_tasks))
+                cache[key] = DayCache(
+                    file_path=files[0],
+                    all_tasks=all_tasks,
+                    task_list=tl,
+                    original_task_list=list(tl),
+                    original_lines={t.line_number: t.to_line() for t in all_tasks},
+                )
+            else:
+                cache[key] = DayCache(
+                    file_path=None,
+                    all_tasks=[],
+                    task_list=[],
+                    original_task_list=[],
+                    original_lines={},
+                )
+        return cache[key]
+
+    @staticmethod
+    def _reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None:
+        """Re-parse a day's file and replace its cache entry with a fresh baseline."""
+        key = day.isoformat()
+        files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
+        if files:
+            all_tasks = TaskParser.parse_file(files[0])
+            tl = list(top_level_tasks(all_tasks))
+            cache[key] = DayCache(
+                file_path=files[0],
+                all_tasks=all_tasks,
+                task_list=tl,
+                original_task_list=list(tl),
+                original_lines={t.line_number: t.to_line() for t in all_tasks},
+            )
+        else:
+            cache[key] = DayCache(None, [], [], [], {})
+
+    @staticmethod
+    def _cache_has_changes(cache: dict) -> bool:
+        for day in cache.values():
+            current_ids = {id(t) for t in day.task_list}
+            orig_ids = {id(t) for t in day.original_task_list}
+            if current_ids != orig_ids:
+                return True
+            for task in day.original_task_list:
+                if task.line_number > 0 and day.original_lines.get(task.line_number) != task.to_line():
+                    return True
+        return False
+
+    @staticmethod
+    def _save_cache(cache: dict, directory: str) -> None:
+        """Write all pending changes from the cache to disk (no prompt)."""
+        backed_up: set = set()
+        dst_keys_written: set = set()
+
+        # Build reverse lookup: id(task) -> date key (where the task currently lives)
+        task_location: dict = {}
+        for key, day in cache.items():
+            for task in day.task_list:
+                task_location[id(task)] = key
+
+        # Phase 1: status changes — save to each task's ORIGINAL day before any cuts.
+        # This includes tasks that will be moved away, so the cut block carries the new status.
+        for key, day in cache.items():
+            if not day.file_path:
+                continue
+            status_changed = [
+                t for t in day.original_task_list
+                if t.line_number > 0
+                and day.original_lines.get(t.line_number) != t.to_line()
+            ]
+            if not status_changed:
+                continue
+            if day.file_path not in backed_up:
+                BackupManager.backup(day.file_path, directory)
+                backed_up.add(day.file_path)
+            with open(day.file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            for task in status_changed:
+                lines[task.line_number - 1] = task.to_line() + '\n'
+            FileWriter.write_atomic(day.file_path, lines)
+
+        # Phase 2: task moves — cut from source files, paste to destination files.
+        for key, day in cache.items():
+            if not day.file_path:
+                continue
+            current_ids = {id(t) for t in day.task_list}
+            departed = [
+                (t, task_location.get(id(t)))
+                for t in day.original_task_list
+                if id(t) not in current_ids
+            ]
+            departed = [(t, dst) for t, dst in departed if dst is not None and dst != key]
+            if not departed:
+                continue
+            if day.file_path not in backed_up:
+                BackupManager.backup(day.file_path, directory)
+                backed_up.add(day.file_path)
+            # Process in reverse line order so earlier line numbers stay valid
+            departed.sort(key=lambda x: x[0].line_number, reverse=True)
+            for task, dst_key in departed:
+                dst_day = cache[dst_key]
+                if dst_day.file_path is None:
+                    dst_path = os.path.join(directory, f"{dst_key}.md")
+                    with open(dst_path, 'w'):
+                        pass
+                    dst_day.file_path = dst_path
+                if dst_day.file_path not in backed_up:
+                    BackupManager.backup(dst_day.file_path, directory)
+                    backed_up.add(dst_day.file_path)
+                block = FileWriter.cut_task(day.file_path, task, day.all_tasks)
+                FileWriter.paste_task(dst_day.file_path, block)
+                dst_keys_written.add(dst_key)
+
+        # Sort timed tasks in destination files
+        for dst_key in dst_keys_written:
+            path = cache[dst_key].file_path
+            if path and os.path.exists(path):
+                all_tasks = TaskParser.parse_file(path)
+                timed = [t for t in all_tasks if t.time is not None and t.parent is None]
+                FileWriter.sort_timed_tasks(path, timed, all_tasks)
+
+        # Reset the baseline so changes aren't re-detected after this save
+        for day in cache.values():
+            day.original_task_list = list(day.task_list)
+
+    @staticmethod
     def run_week(directory='.'):
         today = datetime.date.today()
         week_offset = 0
         start_col = today.weekday()
+        start_row = 0
+        cache: dict = {}
 
         while True:
             monday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=week_offset)
             week_days = [monday + datetime.timedelta(days=i) for i in range(7)]
 
-            file_paths = []
-            week_tasks = []
-            all_tasks_per_day = []
             for day in week_days:
-                files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
-                if files:
-                    all_tasks = TaskParser.parse_file(files[0])
-                    file_paths.append(files[0])
-                    all_tasks_per_day.append(all_tasks)
-                    week_tasks.append(top_level_tasks(all_tasks))
-                else:
-                    file_paths.append(None)
-                    all_tasks_per_day.append([])
-                    week_tasks.append([])
+                PlannerTool._ensure_day_loaded(cache, day, directory)
 
             state = WeekState(
                 week_days=week_days,
-                week_tasks=week_tasks,
-                file_paths=file_paths,
-                all_tasks_per_day=all_tasks_per_day,
+                week_tasks=[cache[d.isoformat()].task_list for d in week_days],
+                file_paths=[cache[d.isoformat()].file_path for d in week_days],
+                all_tasks_per_day=[cache[d.isoformat()].all_tasks for d in week_days],
                 directory=directory,
+                cache=cache,
             )
-            result = PlannerTool.interactive_week(state, start_col=start_col)
+
+            result, start_row = PlannerTool.interactive_week(state, start_col=start_col, start_row=start_row)
+
             if result == 0:
+                if PlannerTool._cache_has_changes(cache):
+                    sys.stdout.write('\x1b[2J\x1b[H')
+                    sys.stdout.flush()
+                    if input("Save changes? [y/n]: ").strip().lower() == 'y':
+                        PlannerTool._save_cache(cache, directory)
+                        print("✓ Changes saved")
                 break
+
             week_offset += result
             start_col = 6 if result == -1 else 0
 
@@ -269,7 +408,7 @@ class PlannerTool:
         sys.stdout.flush()
 
     @staticmethod
-    def _move_task_week(state: WeekState, src_col, dst_col, cursor_row) -> int:
+    def _move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:
         if not state.week_tasks[src_col] or not (0 <= cursor_row < len(state.week_tasks[src_col])):
             return cursor_row
         task = state.week_tasks[src_col].pop(cursor_row)
@@ -277,121 +416,45 @@ class PlannerTool:
         return len(state.week_tasks[dst_col]) - 1
 
     @staticmethod
-    def _save_week(state: WeekState):
-        backed_up = set()
-        dst_paths_written = set()
-        for src_col in range(7):
-            src_path = state.file_paths[src_col]
-            if not src_path:
-                continue
-            current_ids = {id(t) for t in state.week_tasks[src_col]}
-            departed = [
-                (t, next((c for c, col in enumerate(state.week_tasks) if t in col), None))
-                for t in state.original_tasks_by_col[src_col]
-                if id(t) not in current_ids
-            ]
-            departed = [(t, dst) for t, dst in departed if dst is not None]
-            if not departed:
-                continue
-            if src_path not in backed_up:
-                BackupManager.backup(src_path, state.directory)
-                backed_up.add(src_path)
-            # Reverse line order: cutting from the bottom leaves earlier line numbers intact,
-            # so each subsequent cut uses the original line numbers without re-parsing.
-            departed.sort(key=lambda x: x[0].line_number, reverse=True)
-            for task, dst_col in departed:
-                if state.file_paths[dst_col] is None:
-                    new_path = os.path.join(state.directory, state.week_days[dst_col].strftime('%Y-%m-%d.md'))
-                    with open(new_path, 'w'):
-                        pass
-                    state.file_paths[dst_col] = new_path
-                dst_path = state.file_paths[dst_col]
-                if dst_path not in backed_up:
-                    BackupManager.backup(dst_path, state.directory)
-                    backed_up.add(dst_path)
-                block = FileWriter.cut_task(src_path, task, state.all_tasks_per_day[src_col])
-                FileWriter.paste_task(dst_path, block)
-                dst_paths_written.add(dst_path)
-
-        for path in dst_paths_written:
-            all_tasks = TaskParser.parse_file(path)
-            timed = [t for t in all_tasks if t.time is not None and t.parent is None]
-            FileWriter.sort_timed_tasks(path, timed, all_tasks)
-
-    @staticmethod
-    def _save_week_status(state: WeekState):
-        for col_idx, tasks in enumerate(state.original_tasks_by_col):
-            fp = state.file_paths[col_idx]
-            if not fp:
-                continue
-            changed = [t for t in tasks if id(t) in state.status_changed]
-            if not changed:
-                continue
-            BackupManager.backup(fp, state.directory)
-            with open(fp, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            for task in changed:
-                lines[task.line_number - 1] = task.to_line() + '\n'
-            FileWriter.write_atomic(fp, lines)
-
-    @staticmethod
-    def _prompt_save_week(state: WeekState) -> bool:
-        """Prompts to save if there are changes. Returns True if saved."""
-        if not state.has_changes:
-            return False
-        sys.stdout.write('\x1b[2J\x1b[H')
-        sys.stdout.flush()
-        if input("Save changes? [y/n]: ").strip().lower() == 'y':
-            PlannerTool._save_week_status(state)
-            PlannerTool._save_week(state)
-            print("✓ Changes saved")
-            return True
-        return False
-
-    @staticmethod
-    def interactive_week(state: WeekState, start_col: int | None = None) -> int:
+    def interactive_week(state: WeekState, start_col: int | None = None, start_row: int = 0) -> tuple[int, int]:
         cursor_col = start_col if start_col is not None else next((i for i, t in enumerate(state.week_tasks) if t), 0)
-        cursor_row = 0
-        state.original_tasks_by_col = [list(col) for col in state.week_tasks]
-        state.status_changed = set()
-        state.has_changes = False
+        cursor_row = start_row
 
         while True:
             PlannerTool.render_week(state, cursor_col, cursor_row)
             key = PlannerTool.read_key()
 
             if key in ('q', '\x03'):
-                PlannerTool._prompt_save_week(state)
-                return 0
+                return 0, 0
 
             elif key == '\r':
                 if cursor_row == -1:
-                    day = state.week_days[cursor_col]
-                    files = FileFinder.find_journal_files(state.directory, date_from=day, date_to=day)
-                    if files:
-                        tasks = TaskParser.parse_file(files[0])
-                    else:
-                        files = [os.path.join(state.directory, day.strftime('%Y-%m-%d.md'))]
-                        open(files[0], 'w').close()
-                        tasks = []
-                    if PlannerTool._prompt_save_week(state):
-                        tasks = TaskParser.parse_file(files[0])
-                    PlannerTool.interactive_plan(state.directory, files[0], tasks, date=day)
-                    # Reload week data after returning from daily planner
-                    for i, d in enumerate(state.week_days):
-                        fs = FileFinder.find_journal_files(state.directory, date_from=d, date_to=d)
-                        if fs:
-                            all_tasks = TaskParser.parse_file(fs[0])
-                            state.file_paths[i] = fs[0]
-                            state.all_tasks_per_day[i] = all_tasks
-                            state.week_tasks[i] = top_level_tasks(all_tasks)
-                        else:
-                            state.file_paths[i] = None
-                            state.all_tasks_per_day[i] = []
-                            state.week_tasks[i] = []
-                    state.original_tasks_by_col = [list(col) for col in state.week_tasks]
-                    state.status_changed = set()
-                    state.has_changes = False
+                    col = cursor_col
+                    day = state.week_days[col]
+                    day_key = day.isoformat()
+
+                    # Save pending changes so the day planner reads up-to-date files
+                    if PlannerTool._cache_has_changes(state.cache):
+                        PlannerTool._save_cache(state.cache, state.directory)
+
+                    # Reload the target day (file may have been created by _save_cache)
+                    PlannerTool._reload_day_in_cache(state.cache, day, state.directory)
+
+                    fp = state.cache[day_key].file_path
+                    if fp is None:
+                        fp = os.path.join(state.directory, day.strftime('%Y-%m-%d.md'))
+                        open(fp, 'w').close()
+                        PlannerTool._reload_day_in_cache(state.cache, day, state.directory)
+                        fp = state.cache[day_key].file_path
+
+                    tasks = TaskParser.parse_file(fp)
+                    PlannerTool.interactive_plan(state.directory, fp, tasks, date=day)
+
+                    # Reload the day after the day planner closes
+                    PlannerTool._reload_day_in_cache(state.cache, day, state.directory)
+                    state.week_tasks[col] = state.cache[day_key].task_list
+                    state.file_paths[col] = state.cache[day_key].file_path
+                    state.all_tasks_per_day[col] = state.cache[day_key].all_tasks
 
             elif key == 'j':
                 if cursor_row == -1:
@@ -406,16 +469,14 @@ class PlannerTool:
 
             elif key == 'h':
                 if cursor_col == 0:
-                    PlannerTool._prompt_save_week(state)
-                    return -1
+                    return -1, 0
                 cursor_col -= 1
                 if cursor_row >= 0:
                     cursor_row = min(cursor_row, max(len(state.week_tasks[cursor_col]) - 1, 0))
 
             elif key == 'l':
                 if cursor_col == 6:
-                    PlannerTool._prompt_save_week(state)
-                    return 1
+                    return 1, 0
                 cursor_col += 1
                 if cursor_row >= 0:
                     cursor_row = min(cursor_row, max(len(state.week_tasks[cursor_col]) - 1, 0))
@@ -423,20 +484,31 @@ class PlannerTool:
             elif key in ('t', 'i', 'd', 'f') and cursor_row >= 0:
                 tasks = state.week_tasks[cursor_col]
                 if tasks and cursor_row < len(tasks):
-                    task = tasks[cursor_row]
-                    task.status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
-                    state.status_changed.add(id(task))
-                    state.has_changes = True
+                    tasks[cursor_row].status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
 
-            elif key == 'H' and cursor_col > 0 and state.week_tasks[cursor_col]:
-                cursor_row = PlannerTool._move_task_week(state, cursor_col, cursor_col - 1, cursor_row)
-                cursor_col -= 1
-                state.has_changes = True
+            elif key == 'H' and cursor_row >= 0 and state.week_tasks[cursor_col]:
+                if cursor_col > 0:
+                    cursor_row = PlannerTool._move_task_week(state, cursor_col, cursor_col - 1, cursor_row)
+                    cursor_col -= 1
+                else:
+                    # Cross-week: move selected task to Sunday of the previous week
+                    prev_day = state.week_days[0] - datetime.timedelta(days=1)
+                    PlannerTool._ensure_day_loaded(state.cache, prev_day, state.directory)
+                    task = state.week_tasks[cursor_col].pop(cursor_row)
+                    state.cache[prev_day.isoformat()].task_list.append(task)
+                    return -1, len(state.cache[prev_day.isoformat()].task_list) - 1
 
-            elif key == 'L' and cursor_col < 6 and state.week_tasks[cursor_col]:
-                cursor_row = PlannerTool._move_task_week(state, cursor_col, cursor_col + 1, cursor_row)
-                cursor_col += 1
-                state.has_changes = True
+            elif key == 'L' and cursor_row >= 0 and state.week_tasks[cursor_col]:
+                if cursor_col < 6:
+                    cursor_row = PlannerTool._move_task_week(state, cursor_col, cursor_col + 1, cursor_row)
+                    cursor_col += 1
+                else:
+                    # Cross-week: move selected task to Monday of the next week
+                    next_day = state.week_days[6] + datetime.timedelta(days=1)
+                    PlannerTool._ensure_day_loaded(state.cache, next_day, state.directory)
+                    task = state.week_tasks[cursor_col].pop(cursor_row)
+                    state.cache[next_day.isoformat()].task_list.append(task)
+                    return 1, len(state.cache[next_day.isoformat()].task_list) - 1
 
     # ── Persistence ───────────────────────────────────────────────────────────
 

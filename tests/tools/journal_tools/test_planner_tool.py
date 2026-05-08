@@ -258,6 +258,9 @@ class PlannerIntegrationTest(unittest.TestCase):
     def test_week_move_and_sort(self):
         self._run_fixture('week_move_and_sort')
 
+    def test_week_cross_week_move(self):
+        self._run_fixture('week_cross_week_move')
+
 
 class TestInteractivePlanSubtasks(unittest.TestCase):
     CONTENT = (
@@ -335,55 +338,105 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
     def _make_state(self, tasks_by_col=None):
         week_days = [self.MONDAY + datetime.timedelta(days=i) for i in range(7)]
         week_tasks = tasks_by_col if tasks_by_col is not None else [[] for _ in range(7)]
+        # Build a minimal cache so cross-week moves can load adjacent days
+        cache = {}
+        for i, day in enumerate(week_days):
+            cache[day.isoformat()] = MagicMock(
+                file_path=None, all_tasks=[], task_list=week_tasks[i],
+                original_task_list=list(week_tasks[i]), original_lines={},
+            )
         return WeekState(
             week_days=week_days,
             week_tasks=week_tasks,
             file_paths=[None] * 7,
             all_tasks_per_day=[[] for _ in range(7)],
             directory='/tmp',
+            cache=cache,
         )
 
-    def _run(self, keys, start_col=None, tasks_by_col=None, inputs=None):
+    def _run(self, keys, start_col=None, tasks_by_col=None, start_row=0):
         state = self._make_state(tasks_by_col=tasks_by_col)
         with patch.object(PlannerTool, 'read_key', side_effect=keys):
             with patch.object(PlannerTool, 'render_week'):
-                with patch('builtins.input', side_effect=inputs or []):
+                with patch.object(PlannerTool, '_ensure_day_loaded'):
                     with patch('sys.stdout'):
-                        return PlannerTool.interactive_week(state, start_col=start_col)
+                        return PlannerTool.interactive_week(state, start_col=start_col, start_row=start_row)
 
     def test_quit_returns_zero(self):
-        self.assertEqual(self._run(['q']), 0)
+        self.assertEqual(self._run(['q']), (0, 0))
 
     def test_h_on_monday_returns_minus_one(self):
-        self.assertEqual(self._run(['h'], start_col=0), -1)
+        direction, _ = self._run(['h'], start_col=0)
+        self.assertEqual(direction, -1)
 
     def test_l_on_sunday_returns_one(self):
-        self.assertEqual(self._run(['l'], start_col=6), 1)
+        direction, _ = self._run(['l'], start_col=6)
+        self.assertEqual(direction, 1)
 
     def test_h_not_on_monday_moves_left_stays_in_week(self):
-        result = self._run(['h', 'q'], start_col=2)
-        self.assertEqual(result, 0)
+        direction, _ = self._run(['h', 'q'], start_col=2)
+        self.assertEqual(direction, 0)
 
     def test_l_not_on_sunday_moves_right_stays_in_week(self):
-        result = self._run(['l', 'q'], start_col=4)
-        self.assertEqual(result, 0)
+        direction, _ = self._run(['l', 'q'], start_col=4)
+        self.assertEqual(direction, 0)
 
-    def test_h_on_monday_with_changes_prompts_and_returns_minus_one(self):
+    def test_h_on_monday_no_longer_prompts(self):
         task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
         tasks_by_col = [[task]] + [[] for _ in range(6)]
-        # 'd' marks task done (has_changes=True), then 'h' on Monday triggers save prompt
-        result = self._run(['d', 'h'], start_col=0, tasks_by_col=tasks_by_col, inputs=['n'])
-        self.assertEqual(result, -1)
+        # 'd' marks status, then 'h' on Monday navigates without prompting
+        direction, _ = self._run(['d', 'h'], start_col=0, tasks_by_col=tasks_by_col)
+        self.assertEqual(direction, -1)
 
-    def test_l_on_sunday_with_changes_prompts_and_returns_one(self):
+    def test_l_on_sunday_no_longer_prompts(self):
         task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
         tasks_by_col = [[] for _ in range(6)] + [[task]]
-        result = self._run(['d', 'l'], start_col=6, tasks_by_col=tasks_by_col, inputs=['n'])
-        self.assertEqual(result, 1)
+        direction, _ = self._run(['d', 'l'], start_col=6, tasks_by_col=tasks_by_col)
+        self.assertEqual(direction, 1)
 
     def test_default_cursor_lands_on_first_day_with_tasks(self):
         task = Task(title='Task', status='todo', time=None, line_number=1, indent='')
         tasks_by_col = [[], [], [task]] + [[] for _ in range(4)]
         # cursor should start at col 2; pressing h twice lands on col 0; one more h switches week
-        result = self._run(['h', 'h', 'h'], tasks_by_col=tasks_by_col)
-        self.assertEqual(result, -1)
+        direction, _ = self._run(['h', 'h', 'h'], tasks_by_col=tasks_by_col)
+        self.assertEqual(direction, -1)
+
+    def test_H_at_monday_moves_task_to_prev_week(self):
+        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
+        tasks_by_col = [[task]] + [[] for _ in range(6)]
+        state = self._make_state(tasks_by_col=tasks_by_col)
+        prev_day = self.MONDAY - datetime.timedelta(days=1)
+        prev_cache = MagicMock(file_path=None, task_list=[])
+        state.cache[prev_day.isoformat()] = prev_cache
+
+        with patch.object(PlannerTool, 'read_key', side_effect=['H', 'q']):
+            with patch.object(PlannerTool, 'render_week'):
+                with patch.object(PlannerTool, '_ensure_day_loaded',
+                                  side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), prev_cache)):
+                    with patch('sys.stdout'):
+                        direction, row = PlannerTool.interactive_week(state, start_col=0)
+
+        self.assertEqual(direction, -1)
+        self.assertEqual(state.week_tasks[0], [])   # task removed from Monday
+        self.assertEqual(prev_cache.task_list, [task])  # task in prev Sunday
+        self.assertEqual(row, 0)                    # cursor at first (only) row
+
+    def test_L_at_sunday_moves_task_to_next_week(self):
+        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
+        tasks_by_col = [[] for _ in range(6)] + [[task]]
+        state = self._make_state(tasks_by_col=tasks_by_col)
+        next_day = self.MONDAY + datetime.timedelta(days=7)
+        next_cache = MagicMock(file_path=None, task_list=[])
+        state.cache[next_day.isoformat()] = next_cache
+
+        with patch.object(PlannerTool, 'read_key', side_effect=['L', 'q']):
+            with patch.object(PlannerTool, 'render_week'):
+                with patch.object(PlannerTool, '_ensure_day_loaded',
+                                  side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), next_cache)):
+                    with patch('sys.stdout'):
+                        direction, row = PlannerTool.interactive_week(state, start_col=6)
+
+        self.assertEqual(direction, 1)
+        self.assertEqual(state.week_tasks[6], [])   # task removed from Sunday
+        self.assertEqual(next_cache.task_list, [task])  # task in next Monday
+        self.assertEqual(row, 0)
