@@ -3,7 +3,7 @@ import os
 from difflib import unified_diff
 
 from models import Task
-from os_utils import BackupManager, FileFinder
+from os_utils import BackupManager, FileFinder, FileWriter
 from parser import TaskParser
 from tools.journal_tools.rendering import BOLD, GRAY, GREEN, RED, RESET
 
@@ -130,5 +130,4 @@ class CatchUpTool:
                 else:
                     print(f"Warning: Line {line_num} in {file_path} has changed. Skipped.")
 
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
+        FileWriter.write_atomic(file_path, lines)

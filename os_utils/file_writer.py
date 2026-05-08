@@ -30,7 +30,7 @@ class FileWriter:
         block = lines[start:end]
         remaining = lines[:start] + lines[end:]
 
-        _write_atomic(file_path, remaining)
+        FileWriter.write_atomic(file_path,remaining)
         return block
 
     @staticmethod
@@ -43,7 +43,7 @@ class FileWriter:
         if lines and not lines[-1].endswith('\n'):
             lines[-1] += '\n'
 
-        _write_atomic(file_path, lines + block)
+        FileWriter.write_atomic(file_path,lines + block)
 
     @staticmethod
     def move_task(from_path: str, to_path: str, task: Task, all_tasks: list[Task]) -> None:
@@ -96,7 +96,7 @@ class FileWriter:
         for (s, e), block in sorted(all_assignments, key=lambda x: x[0][0], reverse=True):
             new_lines[s:e] = block
 
-        _write_atomic(file_path, new_lines)
+        FileWriter.write_atomic(file_path,new_lines)
 
     @staticmethod
     def reindent_block(block: list[str], from_indent: str, to_indent: str) -> list[str]:
@@ -109,14 +109,14 @@ class FileWriter:
                 result.append(line)
         return result
 
-
-def _write_atomic(file_path: str, lines: list[str]) -> None:
-    tmp = file_path + '.tmp'
-    try:
-        with open(tmp, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-        os.replace(tmp, file_path)
-    except Exception:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
+    @staticmethod
+    def write_atomic(file_path: str, lines: list[str]) -> None:
+        tmp = file_path + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            os.replace(tmp, file_path)
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise

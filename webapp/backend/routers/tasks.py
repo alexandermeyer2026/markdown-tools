@@ -1,32 +1,16 @@
-import os
-import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from .auth import get_current_user
+from .deps import journal_dir, resolve_journal_file
 
 from parser.task_parser import TaskParser
 from models.task import Task
 from os_utils.backup_manager import BackupManager
 
 router = APIRouter()
-
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def _journal_dir() -> Path:
-    return Path(os.getenv("JOURNAL_DIR", "."))
-
-
-def _resolve(date: str) -> Path:
-    if not _DATE_RE.match(date):
-        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
-    path = _journal_dir() / f"{date}.md"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return path
 
 
 def _task_to_dict(task: Task) -> dict:
@@ -54,7 +38,7 @@ class UpdateTaskRequest(BaseModel):
 
 @router.get("/{date}")
 def get_tasks(date: str, _user=Depends(get_current_user)):
-    path = _resolve(date)
+    path = resolve_journal_file(date)
     try:
         all_tasks = TaskParser.parse_file(str(path))
     except Exception as e:
@@ -68,8 +52,8 @@ def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_use
     if req.status not in Task.STATUS_CHAR:
         raise HTTPException(status_code=400, detail=f"Invalid status")
 
-    path = _resolve(date)
-    BackupManager.backup(str(path), str(_journal_dir()))
+    path = resolve_journal_file(date)
+    BackupManager.backup(str(path), str(journal_dir()))
 
     time_part = ""
     if req.time_start:
@@ -103,13 +87,13 @@ def update_task_status(
             detail=f"Invalid status. Valid values: {list(Task.STATUS_CHAR.keys())}",
         )
 
-    path = _resolve(date)
+    path = resolve_journal_file(date)
     all_tasks = TaskParser.parse_file(str(path))
     task = next((t for t in all_tasks if t.line_number == line_number), None)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found at that line")
 
-    BackupManager.backup(str(path), str(_journal_dir()))
+    BackupManager.backup(str(path), str(journal_dir()))
 
     task.status = req.status
     lines = path.read_text().splitlines(keepends=False)

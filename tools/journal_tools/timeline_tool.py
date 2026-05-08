@@ -45,12 +45,6 @@ class TimelineTool:
         TimelineTool.render_timeline(tasks, date=date)
 
     @staticmethod
-    def truncate(string: str, max_len: int) -> str:
-        if len(string) > max_len:
-            return string[:max_len-3] + "..."
-        return string
-
-    @staticmethod
     def render_scale(step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> None:
         hours_line, scale_line = scale_lines(step_size_hours, first_task_slot, now_marker_slot)
         print(hours_line)

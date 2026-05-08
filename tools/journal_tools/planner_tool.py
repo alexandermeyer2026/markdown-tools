@@ -302,7 +302,8 @@ class PlannerTool:
             for task, dst_col in departed:
                 if state.file_paths[dst_col] is None:
                     new_path = os.path.join(state.directory, state.week_days[dst_col].strftime('%Y-%m-%d.md'))
-                    open(new_path, 'w').close()
+                    with open(new_path, 'w'):
+                        pass
                     state.file_paths[dst_col] = new_path
                 dst_path = state.file_paths[dst_col]
                 if dst_path not in backed_up:
@@ -331,15 +332,7 @@ class PlannerTool:
                 lines = f.readlines()
             for task in changed:
                 lines[task.line_number - 1] = task.to_line() + '\n'
-            tmp = fp + '.tmp'
-            try:
-                with open(tmp, 'w', encoding='utf-8') as f:
-                    f.writelines(lines)
-                os.replace(tmp, fp)
-            except Exception:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-                raise
+            FileWriter.write_atomic(fp, lines)
 
     @staticmethod
     def _prompt_save_week(state: WeekState) -> bool:
@@ -471,15 +464,7 @@ class PlannerTool:
         for task in new_tasks:
             lines.append(task.to_line() + '\n')
 
-        tmp = file_path + '.tmp'
-        try:
-            with open(tmp, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
-            os.replace(tmp, file_path)
-        except Exception:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            raise
+        FileWriter.write_atomic(file_path, lines)
 
         all_tasks = TaskParser.parse_file(file_path)
         timed = [t for t in all_tasks if t.time is not None and t.parent is None]
