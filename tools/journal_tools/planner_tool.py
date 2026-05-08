@@ -141,9 +141,11 @@ class PlannerTool:
 
     @staticmethod
     def _week_expanded(tasks: list) -> list[Task]:
-        """Flatten top-level tasks and all their descendants for week display."""
+        """Flatten top-level tasks and all their descendants for week display, timed first."""
+        timed = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
+        untimed = [t for t in tasks if not t.time]
         result = []
-        for task in tasks:
+        for task in timed + untimed:
             result.append(task)
             result.extend(PlannerTool._flatten_tasks(task.children))
         return result

@@ -44,12 +44,12 @@ class UpdateTool:
                                today + datetime.timedelta(days=1),
                                today + datetime.timedelta(days=UpdateTool.UPCOMING_DAYS))
 
-        overdue = [
-            (d, t)
-            for d, tasks in sorted(overdue_by_date.items())
-            for t in tasks
-            if t.status in ('todo', 'in progress', 'started') and t.parent is None
-        ]
+        overdue = []
+        for d, tasks in sorted(overdue_by_date.items()):
+            day = [t for t in tasks if t.status in ('todo', 'in progress', 'started') and t.parent is None]
+            timed   = sorted([t for t in day if t.time], key=lambda t: get_minutes(t.time.start))
+            untimed = [t for t in day if not t.time]
+            overdue.extend((d, t) for t in timed + untimed)
         upcoming = {
             d: [t for t in tasks if t.parent is None]
             for d, tasks in sorted(upcoming_by_date.items())
@@ -216,10 +216,12 @@ class UpdateTool:
             return lines
         for date in sorted(upcoming_by_date):
             tasks = upcoming_by_date[date]
+            timed   = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
+            untimed = [t for t in tasks if not t.time]
             delta = (date - today).days
             label = f"Tomorrow, {date.strftime('%-d %b')}" if delta == 1 else date.strftime('%A, %-d %b')
             lines.append(pad(f"  {BOLD}{label}{RESET}"))
-            for task in tasks:
+            for task in timed + untimed:
                 icon        = STATUS_ICONS.get(task.status, '○')
                 color       = STATUS_COLORS.get(task.status, GRAY)
                 time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
