@@ -35,15 +35,17 @@ class FileWriter:
 
     @staticmethod
     def paste_task(file_path: str, block: list[str]) -> None:
-        """Append a task block to the end of a file."""
+        """Append a task block to the end of a file, preceded by a blank line."""
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        # Ensure the file ends with a newline before appending
-        if lines and not lines[-1].endswith('\n'):
-            lines[-1] += '\n'
+        if lines:
+            if not lines[-1].endswith('\n'):
+                lines[-1] += '\n'
+            if lines[-1] != '\n':
+                lines.append('\n')
 
-        FileWriter.write_atomic(file_path,lines + block)
+        FileWriter.write_atomic(file_path, lines + block)
 
     @staticmethod
     def move_task(from_path: str, to_path: str, task: Task, all_tasks: list[Task]) -> None:
@@ -96,7 +98,21 @@ class FileWriter:
         for (s, e), block in sorted(all_assignments, key=lambda x: x[0][0], reverse=True):
             new_lines[s:e] = block
 
-        FileWriter.write_atomic(file_path,new_lines)
+        FileWriter.write_atomic(file_path, FileWriter._with_task_spacing(new_lines))
+
+    @staticmethod
+    def _with_task_spacing(lines: list[str]) -> list[str]:
+        """Ensure exactly one blank line before each top-level task; strip trailing blank lines."""
+        result = []
+        for line in lines:
+            if line == '\n' and result and result[-1] == '\n':
+                continue  # collapse consecutive blank lines
+            if line.startswith('- ') and result and result[-1] != '\n':
+                result.append('\n')
+            result.append(line)
+        while result and result[-1].strip() == '':
+            result.pop()
+        return result
 
     @staticmethod
     def reindent_block(block: list[str], from_indent: str, to_indent: str) -> list[str]:

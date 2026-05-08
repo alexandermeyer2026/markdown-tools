@@ -277,10 +277,8 @@ class PlannerTool:
             if day.file_path not in backed_up:
                 BackupManager.backup(day.file_path, directory)
                 backed_up.add(day.file_path)
-            block: list[str] = []
             for task in day.new_tasks:
-                block.extend(PlannerTool._task_to_lines(task))
-            FileWriter.paste_task(day.file_path, block)
+                FileWriter.paste_task(day.file_path, PlannerTool._task_to_lines(task))
             day.new_tasks.clear()
 
         # Build reverse lookup: id(task) -> date key (where the task currently lives)
@@ -652,6 +650,8 @@ class PlannerTool:
                 lines[task.line_number - 1] = task.to_line() + '\n'
 
         for task in new_tasks:
+            if lines:
+                lines.append('\n')
             lines.append(task.to_line() + '\n')
 
         FileWriter.write_atomic(file_path, lines)
