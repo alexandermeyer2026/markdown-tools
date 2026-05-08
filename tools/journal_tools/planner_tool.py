@@ -23,6 +23,8 @@ class DayCache:
     task_list: list          # current top-level tasks (mutable, shared with WeekState)
     original_task_list: list # snapshot at load time (for change detection)
     original_lines: dict     # {line_number: original to_line()} for status detection
+    new_tasks: list = field(default_factory=list)       # tasks created in-session (no line number)
+    moved_subtasks: list = field(default_factory=list)  # subtasks removed from parents in this day
 
 
 @dataclass
@@ -131,6 +133,28 @@ class PlannerTool:
         return result
 
     @staticmethod
+    def _task_to_lines(task: Task) -> list[str]:
+        lines = [task.to_line() + '\n']
+        for child in task.children:
+            lines.extend(PlannerTool._task_to_lines(child))
+        return lines
+
+    @staticmethod
+    def _week_expanded(tasks: list) -> list[Task]:
+        """Flatten top-level tasks and all their descendants for week display."""
+        result = []
+        for task in tasks:
+            result.append(task)
+            result.extend(PlannerTool._flatten_tasks(task.children))
+        return result
+
+    @staticmethod
+    def _root_task(task: Task) -> Task:
+        while task.parent is not None:
+            task = task.parent
+        return task
+
+    @staticmethod
     def render(file_path, timed_tasks, untimed_tasks, selected_task,
                step_size_hours, directory, has_changes, date):
         lines = []
@@ -223,11 +247,13 @@ class PlannerTool:
     @staticmethod
     def _cache_has_changes(cache: dict) -> bool:
         for day in cache.values():
+            if day.new_tasks or day.moved_subtasks:
+                return True
             current_ids = {id(t) for t in day.task_list}
             orig_ids = {id(t) for t in day.original_task_list}
             if current_ids != orig_ids:
                 return True
-            for task in day.original_task_list:
+            for task in PlannerTool._flatten_tasks(day.original_task_list):
                 if task.line_number > 0 and day.original_lines.get(task.line_number) != task.to_line():
                     return True
         return False
@@ -237,6 +263,23 @@ class PlannerTool:
         """Write all pending changes from the cache to disk (no prompt)."""
         backed_up: set = set()
         dst_keys_written: set = set()
+
+        # Phase 0: new tasks — append to destination files before any removals.
+        for key, day in cache.items():
+            if not day.new_tasks:
+                continue
+            if day.file_path is None:
+                day.file_path = os.path.join(directory, f"{key}.md")
+                with open(day.file_path, 'w', encoding='utf-8'):
+                    pass
+            if day.file_path not in backed_up:
+                BackupManager.backup(day.file_path, directory)
+                backed_up.add(day.file_path)
+            block: list[str] = []
+            for task in day.new_tasks:
+                block.extend(PlannerTool._task_to_lines(task))
+            FileWriter.paste_task(day.file_path, block)
+            day.new_tasks.clear()
 
         # Build reverse lookup: id(task) -> date key (where the task currently lives)
         task_location: dict = {}
@@ -250,7 +293,7 @@ class PlannerTool:
             if not day.file_path:
                 continue
             status_changed = [
-                t for t in day.original_task_list
+                t for t in PlannerTool._flatten_tasks(day.original_task_list)
                 if t.line_number > 0
                 and day.original_lines.get(t.line_number) != t.to_line()
             ]
@@ -264,6 +307,25 @@ class PlannerTool:
             for task in status_changed:
                 lines[task.line_number - 1] = task.to_line() + '\n'
             FileWriter.write_atomic(day.file_path, lines)
+
+        # Phase 1.5: remove carried-forward subtask lines from source files.
+        for key, day in cache.items():
+            if not day.moved_subtasks or not day.file_path:
+                continue
+            if day.file_path not in backed_up:
+                BackupManager.backup(day.file_path, directory)
+                backed_up.add(day.file_path)
+            with open(day.file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            lines_to_remove: set[int] = set()
+            for subtask in day.moved_subtasks:
+                for t in PlannerTool._flatten_tasks([subtask]):
+                    if 0 < t.line_number <= len(lines):
+                        lines_to_remove.add(t.line_number)
+            if lines_to_remove:
+                remaining = [line for i, line in enumerate(lines, 1) if i not in lines_to_remove]
+                FileWriter.write_atomic(day.file_path, remaining)
+            day.moved_subtasks.clear()
 
         # Phase 2: task moves — cut from source files, paste to destination files.
         for key, day in cache.items():
@@ -353,7 +415,18 @@ class PlannerTool:
         if task is None:
             text = prefix.ljust(col_width)
             return f'\x1b[7m{text}{RESET}' if is_selected else text
-        icon      = STATUS_ICONS.get(task.status, '?')
+        icon = STATUS_ICONS.get(task.status, '?')
+        if task.parent is not None:
+            depth = 0
+            p = task.parent
+            while p is not None:
+                depth += 1
+                p = p.parent
+            title_max = max(col_width - 4 - depth, 1)
+            title_str = task.title[:title_max].ljust(title_max)
+            if is_selected:
+                return f'\x1b[7m> {" " * depth}{icon} {title_str}{RESET}'
+            return f'  {" " * depth}{GRAY}{icon} {title_str}{RESET}'
         color     = STATUS_COLORS.get(task.status, GRAY)
         title_max = col_width - 4  # 2 prefix + 1 icon + 1 space
         title_str = task.title[:title_max].ljust(title_max)
@@ -387,21 +460,22 @@ class PlannerTool:
         lines.append(margin + ('─' * (col_width - 1) + ' ') * 7)
 
         # Task rows — at least 1 row so the cursor is always visible
-        max_rows = max(max((len(t) for t in state.week_tasks), default=0), 1)
+        expanded_per_col = [PlannerTool._week_expanded(state.week_tasks[i]) for i in range(7)]
+        max_rows = max(max((len(e) for e in expanded_per_col), default=0), 1)
         for row in range(max_rows):
             line = margin
             for col_idx in range(7):
-                tasks = state.week_tasks[col_idx]
+                exp = expanded_per_col[col_idx]
                 is_selected = (col_idx == cursor_col and row == cursor_row)
-                if row < len(tasks):
-                    line += PlannerTool._week_cell(tasks[row], col_width, is_selected)
+                if row < len(exp):
+                    line += PlannerTool._week_cell(exp[row], col_width, is_selected)
                 elif is_selected:
                     line += PlannerTool._week_cell(None, col_width, True)
                 else:
                     line += ' ' * col_width
             lines.append(line)
 
-        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
+        lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task  [>] carry subtasks  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
 
         padded = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
         sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded) + '\x1b[J\x1b[?25h')
@@ -460,9 +534,9 @@ class PlannerTool:
                 if cursor_row == -1:
                     cursor_row = 0
                 else:
-                    tasks = state.week_tasks[cursor_col]
-                    if tasks:
-                        cursor_row = min(cursor_row + 1, len(tasks) - 1)
+                    exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                    if exp:
+                        cursor_row = min(cursor_row + 1, len(exp) - 1)
 
             elif key == 'k':
                 cursor_row = max(cursor_row - 1, -1)
@@ -472,43 +546,85 @@ class PlannerTool:
                     return -1, 0
                 cursor_col -= 1
                 if cursor_row >= 0:
-                    cursor_row = min(cursor_row, max(len(state.week_tasks[cursor_col]) - 1, 0))
+                    exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                    cursor_row = min(cursor_row, max(len(exp) - 1, 0))
 
             elif key == 'l':
                 if cursor_col == 6:
                     return 1, 0
                 cursor_col += 1
                 if cursor_row >= 0:
-                    cursor_row = min(cursor_row, max(len(state.week_tasks[cursor_col]) - 1, 0))
+                    exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                    cursor_row = min(cursor_row, max(len(exp) - 1, 0))
 
             elif key in ('t', 'i', 'd', 'f') and cursor_row >= 0:
-                tasks = state.week_tasks[cursor_col]
-                if tasks and cursor_row < len(tasks):
-                    tasks[cursor_row].status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
+                exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                if cursor_row < len(exp):
+                    exp[cursor_row].status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
 
             elif key == 'H' and cursor_row >= 0 and state.week_tasks[cursor_col]:
-                if cursor_col > 0:
-                    cursor_row = PlannerTool._move_task_week(state, cursor_col, cursor_col - 1, cursor_row)
-                    cursor_col -= 1
-                else:
-                    # Cross-week: move selected task to Sunday of the previous week
-                    prev_day = state.week_days[0] - datetime.timedelta(days=1)
-                    PlannerTool._ensure_day_loaded(state.cache, prev_day, state.directory)
-                    task = state.week_tasks[cursor_col].pop(cursor_row)
-                    state.cache[prev_day.isoformat()].task_list.append(task)
-                    return -1, len(state.cache[prev_day.isoformat()].task_list) - 1
+                exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                if cursor_row < len(exp):
+                    root = PlannerTool._root_task(exp[cursor_row])
+                    root_idx = state.week_tasks[cursor_col].index(root)
+                    if cursor_col > 0:
+                        PlannerTool._move_task_week(state, cursor_col, cursor_col - 1, root_idx)
+                        cursor_col -= 1
+                        new_exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                        cursor_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
+                    else:
+                        prev_day = state.week_days[0] - datetime.timedelta(days=1)
+                        PlannerTool._ensure_day_loaded(state.cache, prev_day, state.directory)
+                        state.week_tasks[cursor_col].pop(root_idx)
+                        state.cache[prev_day.isoformat()].task_list.append(root)
+                        prev_exp = PlannerTool._week_expanded(state.cache[prev_day.isoformat()].task_list)
+                        new_row = next((i for i, t in enumerate(prev_exp) if t is root), len(prev_exp) - 1)
+                        return -1, new_row
 
             elif key == 'L' and cursor_row >= 0 and state.week_tasks[cursor_col]:
-                if cursor_col < 6:
-                    cursor_row = PlannerTool._move_task_week(state, cursor_col, cursor_col + 1, cursor_row)
-                    cursor_col += 1
-                else:
-                    # Cross-week: move selected task to Monday of the next week
-                    next_day = state.week_days[6] + datetime.timedelta(days=1)
-                    PlannerTool._ensure_day_loaded(state.cache, next_day, state.directory)
-                    task = state.week_tasks[cursor_col].pop(cursor_row)
-                    state.cache[next_day.isoformat()].task_list.append(task)
-                    return 1, len(state.cache[next_day.isoformat()].task_list) - 1
+                exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                if cursor_row < len(exp):
+                    root = PlannerTool._root_task(exp[cursor_row])
+                    root_idx = state.week_tasks[cursor_col].index(root)
+                    if cursor_col < 6:
+                        PlannerTool._move_task_week(state, cursor_col, cursor_col + 1, root_idx)
+                        cursor_col += 1
+                        new_exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                        cursor_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
+                    else:
+                        next_day = state.week_days[6] + datetime.timedelta(days=1)
+                        PlannerTool._ensure_day_loaded(state.cache, next_day, state.directory)
+                        state.week_tasks[cursor_col].pop(root_idx)
+                        state.cache[next_day.isoformat()].task_list.append(root)
+                        next_exp = PlannerTool._week_expanded(state.cache[next_day.isoformat()].task_list)
+                        new_row = next((i for i, t in enumerate(next_exp) if t is root), len(next_exp) - 1)
+                        return 1, new_row
+
+            elif key == '>' and cursor_row >= 0:
+                exp = PlannerTool._week_expanded(state.week_tasks[cursor_col])
+                if cursor_row < len(exp):
+                    task = exp[cursor_row]
+                    if task.parent is None:
+                        unfinished = [c for c in task.children if c.status not in ('done', 'failed')]
+                        if unfinished:
+                            task.children = [c for c in task.children if c.status in ('done', 'failed')]
+                            day_key = state.week_days[cursor_col].isoformat()
+                            state.cache[day_key].moved_subtasks.extend(unfinished)
+                            tomorrow = state.week_days[cursor_col] + datetime.timedelta(days=1)
+                            PlannerTool._ensure_day_loaded(state.cache, tomorrow, state.directory)
+                            new_task = Task(
+                                title=task.title,
+                                status='todo',
+                                time=None,
+                                line_number=-1,
+                                indent='',
+                                children=list(unfinished),
+                            )
+                            for child in unfinished:
+                                child.parent = new_task
+                            tomorrow_key = tomorrow.isoformat()
+                            state.cache[tomorrow_key].task_list.append(new_task)
+                            state.cache[tomorrow_key].new_tasks.append(new_task)
 
     # ── Persistence ───────────────────────────────────────────────────────────
 

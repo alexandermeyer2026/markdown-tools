@@ -12,7 +12,7 @@ import pytest
 
 from models import Task, TaskTime, minutes_to_time
 from parser.task_parser import TaskParser
-from tools.journal_tools.planner_tool import PlannerTool, WeekState
+from tools.journal_tools.planner_tool import PlannerTool, WeekState, DayCache
 
 JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
@@ -261,6 +261,12 @@ class PlannerIntegrationTest(unittest.TestCase):
     def test_week_cross_week_move(self):
         self._run_fixture('week_cross_week_move')
 
+    def test_week_subtask_status(self):
+        self._run_fixture('week_subtask_status')
+
+    def test_week_carry_forward(self):
+        self._run_fixture('week_carry_forward')
+
 
 class TestInteractivePlanSubtasks(unittest.TestCase):
     CONTENT = (
@@ -344,6 +350,7 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
             cache[day.isoformat()] = MagicMock(
                 file_path=None, all_tasks=[], task_list=week_tasks[i],
                 original_task_list=list(week_tasks[i]), original_lines={},
+                new_tasks=[], moved_subtasks=[],
             )
         return WeekState(
             week_days=week_days,
@@ -440,3 +447,123 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
         self.assertEqual(state.week_tasks[6], [])   # task removed from Sunday
         self.assertEqual(next_cache.task_list, [task])  # task in next Monday
         self.assertEqual(row, 0)
+
+    def test_j_enters_subtask_and_d_marks_it_done(self):
+        child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                      children=[child])
+        child.parent = parent
+        tasks_by_col = [[parent]] + [[] for _ in range(6)]
+        self._run(['j', 'd', 'q'], start_col=0, tasks_by_col=tasks_by_col)
+        self.assertEqual(child.status, 'done')
+        self.assertEqual(parent.status, 'todo')
+
+    def test_H_on_subtask_moves_root_parent(self):
+        child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                      children=[child])
+        child.parent = parent
+        tasks_by_col = [[] for _ in range(7)]
+        tasks_by_col[1] = [parent]
+        # cursor starts at row 1 (subtask); H should move the root parent
+        self._run(['H', 'q'], start_col=1, tasks_by_col=tasks_by_col, start_row=1)
+        self.assertEqual(tasks_by_col[0], [parent])
+        self.assertEqual(tasks_by_col[1], [])
+
+    def test_carry_forward_removes_unfinished_subtasks_from_parent(self):
+        child_done = Task(title='Sub done', status='done', time=None, line_number=2, indent='  ')
+        child_todo = Task(title='Sub todo', status='todo', time=None, line_number=3, indent='  ')
+        parent = Task(title='My task', status='todo', time=None, line_number=1, indent='',
+                      children=[child_done, child_todo])
+        child_done.parent = parent
+        child_todo.parent = parent
+        tasks_by_col = [[parent]] + [[] for _ in range(6)]
+        state = self._make_state(tasks_by_col=tasks_by_col)
+
+        with patch.object(PlannerTool, 'read_key', side_effect=['>', 'q']):
+            with patch.object(PlannerTool, 'render_week'):
+                with patch.object(PlannerTool, '_ensure_day_loaded'):
+                    PlannerTool.interactive_week(state, start_col=0)
+
+        self.assertEqual(parent.children, [child_done])
+
+    def test_carry_forward_adds_new_task_to_tomorrow(self):
+        child_done = Task(title='Sub done', status='done', time=None, line_number=2, indent='  ')
+        child_todo = Task(title='Sub todo', status='todo', time=None, line_number=3, indent='  ')
+        parent = Task(title='My task', status='todo', time=None, line_number=1, indent='',
+                      children=[child_done, child_todo])
+        child_done.parent = parent
+        child_todo.parent = parent
+        tasks_by_col = [[parent]] + [[] for _ in range(6)]
+        state = self._make_state(tasks_by_col=tasks_by_col)
+
+        tuesday_key = (self.MONDAY + datetime.timedelta(days=1)).isoformat()
+
+        with patch.object(PlannerTool, 'read_key', side_effect=['>', 'q']):
+            with patch.object(PlannerTool, 'render_week'):
+                with patch.object(PlannerTool, '_ensure_day_loaded'):
+                    PlannerTool.interactive_week(state, start_col=0)
+
+        tuesday_tasks = state.cache[tuesday_key].task_list
+        self.assertEqual(len(tuesday_tasks), 1)
+        new_task = tuesday_tasks[0]
+        self.assertEqual(new_task.title, 'My task')
+        self.assertEqual(new_task.line_number, -1)
+        self.assertEqual(len(new_task.children), 1)
+        self.assertIs(new_task.children[0], child_todo)
+
+    def test_carry_forward_noop_when_all_subtasks_done(self):
+        child_done = Task(title='Sub done', status='done', time=None, line_number=2, indent='  ')
+        parent = Task(title='My task', status='todo', time=None, line_number=1, indent='',
+                      children=[child_done])
+        child_done.parent = parent
+        tasks_by_col = [[parent]] + [[] for _ in range(6)]
+        state = self._make_state(tasks_by_col=tasks_by_col)
+
+        tuesday_key = (self.MONDAY + datetime.timedelta(days=1)).isoformat()
+
+        with patch.object(PlannerTool, 'read_key', side_effect=['>', 'q']):
+            with patch.object(PlannerTool, 'render_week'):
+                with patch.object(PlannerTool, '_ensure_day_loaded'):
+                    PlannerTool.interactive_week(state, start_col=0)
+
+        self.assertEqual(parent.children, [child_done])
+        self.assertEqual(state.cache[tuesday_key].task_list, [])
+
+
+class TestWeekCacheChanges(unittest.TestCase):
+
+    def _make_cache(self, tasks):
+        tl = [t for t in tasks if t.parent is None]
+        return {
+            '2024-01-15': DayCache(
+                file_path=None,
+                all_tasks=tasks,
+                task_list=tl,
+                original_task_list=list(tl),
+                original_lines={t.line_number: t.to_line() for t in tasks if t.line_number > 0},
+            )
+        }
+
+    def test_no_changes_returns_false(self):
+        child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                      children=[child])
+        child.parent = parent
+        cache = self._make_cache([parent, child])
+        self.assertFalse(PlannerTool._cache_has_changes(cache))
+
+    def test_parent_status_change_detected(self):
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        cache = self._make_cache([parent])
+        parent.status = 'done'
+        self.assertTrue(PlannerTool._cache_has_changes(cache))
+
+    def test_subtask_status_change_detected(self):
+        child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                      children=[child])
+        child.parent = parent
+        cache = self._make_cache([parent, child])
+        child.status = 'done'
+        self.assertTrue(PlannerTool._cache_has_changes(cache))
