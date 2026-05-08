@@ -13,12 +13,12 @@ EMAIL=${2:?Usage: ./scripts/deploy.sh <domain> <email>}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-# ── 1. Substitute domain in nginx config ──────────────────────────────────────
-sed -i "s/YOUR_DOMAIN/$DOMAIN/g" nginx/nginx.conf
+# ── 1. Generate nginx config from template ────────────────────────────────────
+sed "s/YOUR_DOMAIN/$DOMAIN/g" nginx/nginx.conf.template > nginx/nginx.conf
 
-# ── 2. Substitute domain in backend .env (CORS_ORIGINS) ──────────────────────
+# ── 2. Generate backend .env from template ────────────────────────────────────
 if [ ! -f backend/.env ]; then
-  cp backend/.env.example backend/.env
+  sed "s|https://yourdomain.com|https://$DOMAIN|g" backend/.env.example > backend/.env
   echo ""
   echo "backend/.env created from .env.example."
   echo "Edit it now to set SECRET_KEY and PASSWORD_HASH, then re-run this script."
@@ -27,8 +27,6 @@ if [ ! -f backend/.env ]; then
   echo "  python3 -c \"import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())\""
   exit 1
 fi
-
-sed -i "s|https://yourdomain.com|https://$DOMAIN|g" backend/.env
 
 # ── 3. Install certbot and obtain SSL certificate ─────────────────────────────
 if ! command -v certbot > /dev/null 2>&1; then
@@ -47,7 +45,8 @@ echo "Starting services..."
 docker compose up -d --build
 
 # ── 5. Set up automatic cert renewal ─────────────────────────────────────────
-(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && docker compose -f $SCRIPT_DIR/../docker-compose.yml restart nginx") | crontab -
+COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.yml"
+(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && docker compose -f $COMPOSE_FILE restart nginx") | crontab -
 
 echo ""
 echo "Done. App is live at https://$DOMAIN"
