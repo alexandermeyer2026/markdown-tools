@@ -174,7 +174,7 @@ class PlannerTool:
     def run_week(directory='.'):
         today = datetime.date.today()
         week_offset = 0
-        start_col = None
+        start_col = today.weekday()
 
         while True:
             monday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=week_offset)
