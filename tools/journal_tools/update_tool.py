@@ -7,8 +7,9 @@ from os_utils import FileFinder
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
-    ansi_truncate_pad, get_minutes, get_time_slot, scale_lines,
+    ansi_truncate_pad, get_minutes,
 )
+from tools.journal_tools.timeline_tool import TimelineTool
 
 CLOCK_DIGITS = {
     '0': ["███", "█ █", "█ █", "█ █", "███"],
@@ -194,14 +195,8 @@ class UpdateTool:
             return lines
 
         if timed:
-            step       = 0.5
-            first_slot = get_time_slot(get_minutes(timed[0].time.start), step)
-            now_slot   = get_time_slot(now_m, step)
-            hours_line, scale_line = scale_lines(step, first_slot, now_slot)
-            lines.append(pad('  ' + hours_line))
-            lines.append(pad('  ' + scale_line))
-            for task in timed:
-                lines.append(pad('  ' + UpdateTool._task_bar(task, step, first_slot)))
+            for line in TimelineTool.render_timeline_lines(timed, today, col_w - 2):
+                lines.append(pad('  ' + line))
 
         if timed and untimed:
             lines.append(' ' * col_w)
@@ -230,18 +225,6 @@ class UpdateTool:
                 time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
                 lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
         return lines
-
-    @staticmethod
-    def _task_bar(task, step, first_slot):
-        color      = STATUS_COLORS.get(task.status, GRAY)
-        icon       = STATUS_ICONS.get(task.status, '○')
-        start_slot = get_time_slot(get_minutes(task.time.start), step)
-        end_slot   = start_slot
-        if task.time.end:
-            end_slot = get_time_slot(get_minutes(task.time.end) - 1, step)
-        bar    = color + '█' * max(end_slot - start_slot + 1, 1) + RESET
-        offset = start_slot - first_slot
-        return ' ' * offset + bar + f"  {color}{icon}{RESET}  {task.time.to_str()}  {BOLD}{task.title}{RESET}"
 
     @staticmethod
     def _three_columns(today, now, overdue, today_tasks, upcoming_by_date):

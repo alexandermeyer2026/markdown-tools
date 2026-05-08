@@ -7,9 +7,10 @@ from os_utils import FileFinder, resolve_date
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, RESET,
-    get_minutes, get_time_slot,
-    scale_lines, subtask_rows,
+    get_minutes, get_time_slot, scale_lines, subtask_rows,
 )
+
+_STEP_SIZES = [0.25, 0.5, 1]
 
 
 class TimelineTool:
@@ -41,7 +42,7 @@ class TimelineTool:
                 return
 
         tasks = TaskParser.parse_file(input_file)
-        TimelineTool.render_timeline(tasks, date=date, step_size_hours=0.25)
+        TimelineTool.render_timeline(tasks, date=date)
 
     @staticmethod
     def truncate(string: str, max_len: int) -> str:
@@ -50,19 +51,18 @@ class TimelineTool:
         return string
 
     @staticmethod
-    def validate_step_size(step_size_hours: float) -> None:
-        STEP_SIZES = [0.25, 0.5, 1]
-        if step_size_hours not in STEP_SIZES:
-            raise ValueError(
-                f"Invalid step size: {step_size_hours}"
-                f" (valid sizes: {STEP_SIZES})"
-            )
-
-    @staticmethod
     def render_scale(step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> None:
         hours_line, scale_line = scale_lines(step_size_hours, first_task_slot, now_marker_slot)
         print(hours_line)
         print(scale_line)
+
+    @staticmethod
+    def _step_size_for_width(first_task_minutes: int, width: int) -> float:
+        for step in _STEP_SIZES:
+            first_slot = get_time_slot(first_task_minutes, step)
+            if int(24 / step) - first_slot <= width:
+                return step
+        return _STEP_SIZES[-1]
 
     @staticmethod
     def render_task(task: Task, step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> str:
@@ -99,39 +99,35 @@ class TimelineTool:
         return (start_slot - first_task_slot) + bar_width + 1
 
     @staticmethod
-    def render_tasks(timed_tasks: list[Task], step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> None:
-        for task in timed_tasks:
-            line = TimelineTool.render_task(task, step_size_hours, first_task_slot, now_marker_slot)
-            print(line)
-            for row in subtask_rows(task, left_pad=TimelineTool._icon_col(task, step_size_hours, first_task_slot)):
-                print(row)
-
-    @staticmethod
-    def render_timeline(tasks: list[Task], date: datetime.date, step_size_hours: float = 1) -> None:
-
-        TimelineTool.validate_step_size(step_size_hours)
-
-        try:
-            terminal_width = shutil.get_terminal_size().columns
-        except (OSError, AttributeError):
-            terminal_width = 80
-
+    def render_timeline_lines(tasks: list[Task], date: datetime.date, width: int) -> list[str]:
         timed_tasks = [x for x in tasks if x.time and x.time.start and x.parent is None]
         timed_tasks.sort(key=lambda x: get_minutes(x.time.start))
 
         if not timed_tasks:
-            print("No timed tasks found")
-            return
+            return ["No timed tasks found"]
 
-        first_task = timed_tasks[0]
-        first_task_minutes = get_minutes(first_task.time.start)
-        first_task_slot = get_time_slot(first_task_minutes, step_size_hours)
+        first_task_minutes = get_minutes(timed_tasks[0].time.start)
+        step = TimelineTool._step_size_for_width(first_task_minutes, width)
+        first_task_slot = get_time_slot(first_task_minutes, step)
 
         now_marker_slot = None
         if date == datetime.date.today():
-            current_hour = datetime.datetime.now().hour
-            current_minutes = current_hour * 60 + datetime.datetime.now().minute
-            now_marker_slot = get_time_slot(current_minutes, step_size_hours)
+            now = datetime.datetime.now()
+            now_marker_slot = get_time_slot(now.hour * 60 + now.minute, step)
 
-        TimelineTool.render_scale(step_size_hours, first_task_slot, now_marker_slot)
-        TimelineTool.render_tasks(timed_tasks, step_size_hours, first_task_slot, now_marker_slot)
+        hours_line, scale_line = scale_lines(step, first_task_slot, now_marker_slot)
+        lines = [hours_line, scale_line]
+        for task in timed_tasks:
+            lines.append(TimelineTool.render_task(task, step, first_task_slot, now_marker_slot))
+            lines.extend(subtask_rows(task, left_pad=TimelineTool._icon_col(task, step, first_task_slot)))
+
+        return lines
+
+    @staticmethod
+    def render_timeline(tasks: list[Task], date: datetime.date) -> None:
+        try:
+            width = shutil.get_terminal_size().columns
+        except (OSError, AttributeError):
+            width = 80
+        for line in TimelineTool.render_timeline_lines(tasks, date, width):
+            print(line)

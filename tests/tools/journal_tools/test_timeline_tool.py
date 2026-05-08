@@ -78,13 +78,13 @@ class TestRenderScale(unittest.TestCase):
 @pytest.mark.integration
 class TestIntegration(unittest.TestCase):
     EXPECTED_OUTPUT = (
-        "    12    18    24\n"
-        "────┼─────┼─────┤\n"
-        "█ ✓ 8:00-9:00 Morning routine\n"
-        " ██ ○ 9:00-10:30 Work on project\n"
-        "  █ ✓ 10:30-11:00 Coffee break\n"
-        "   █ ○ 11:00-12:00 Team meeting\n"
-        "      █ ○ 14:00 Review PRs\n"
+        "    9           12          15          18          21          24\n"
+        "────┼───────────┼───────────┼───────────┼───────────┼───────────┤\n"
+        "████ ✓ 8:00-9:00 Morning routine\n"
+        "    ██████ ○ 9:00-10:30 Work on project\n"
+        "          ██ ✓ 10:30-11:00 Coffee break\n"
+        "            ████ ○ 11:00-12:00 Team meeting\n"
+        "                        █ ○ 14:00 Review PRs\n"
     )
 
     def setUp(self):
@@ -92,7 +92,7 @@ class TestIntegration(unittest.TestCase):
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 80})()):
             with redirect_stdout(buf):
-                TimelineTool.render_timeline(tasks, FIXTURE_DATE, step_size_hours=1.0)
+                TimelineTool.render_timeline(tasks, FIXTURE_DATE)
         self.output = strip_ansi(buf.getvalue())
 
     def test_complete_output(self):
