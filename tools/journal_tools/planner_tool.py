@@ -723,7 +723,7 @@ class PlannerTool:
                             end=minutes_to_time(new_start + duration),
                         )
                     else:
-                        new_start = max(0, min(start_m + direction * step_m, 23 * 60 + 30))
+                        new_start = max(0, min(start_m + direction * step_m, 23 * 60 + 45))
                         selected.time = TaskTime(start=minutes_to_time(new_start))
                     timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
                 navigable  = PlannerTool._flatten_tasks(timed_tasks + untimed_tasks)
