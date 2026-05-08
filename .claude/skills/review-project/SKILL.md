@@ -5,7 +5,7 @@ Review the entire project codebase for code quality, architecture, and cleanline
 ## Steps
 
 1. Discover all source files:
-   - Run `find . -type f -name "*.py" | grep -v __pycache__ | grep -v .venv | grep -v .git | sort`
+   - Run `git ls-files` to list every tracked file, then skip binary formats (images, fonts, compiled assets, lockfiles: `.png`, `.jpg`, `.svg`, `.ico`, `.woff`, `.ttf`, `.pyc`, `.lock`, `.sum`).
 
 2. Read every source file in full.
 
