@@ -9,6 +9,7 @@ from .deps import journal_dir, resolve_journal_file
 from parser.task_parser import TaskParser
 from models.task import Task
 from os_utils.backup_manager import BackupManager
+from os_utils.file_writer import FileWriter
 
 router = APIRouter()
 
@@ -68,8 +69,10 @@ def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_use
     char = Task.STATUS_CHAR[req.status]
     line = f"- [{char}] {time_part}{req.title}\n"
 
-    with open(path, "a") as f:
-        f.write(line)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    FileWriter.write_atomic(str(path), lines + [line])
 
     return {"message": "created"}
 
@@ -96,8 +99,8 @@ def update_task_status(
     BackupManager.backup(str(path), str(journal_dir()))
 
     task.status = req.status
-    lines = path.read_text().splitlines(keepends=False)
-    lines[line_number - 1] = task.to_line()
-    path.write_text("\n".join(lines) + "\n")
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines[line_number - 1] = task.to_line() + "\n"
+    FileWriter.write_atomic(str(path), lines)
 
     return {"message": "updated", "task": _task_to_dict(task)}

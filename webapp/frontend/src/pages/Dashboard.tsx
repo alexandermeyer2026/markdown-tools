@@ -19,6 +19,8 @@ export default function Dashboard() {
     try {
       const { data } = await api.get('/files')
       setDates(data.dates)
+    } catch {
+      alert('Failed to load files')
     } finally {
       setLoading(false)
     }
@@ -43,19 +45,27 @@ export default function Dashboard() {
   }
 
   async function handleDownload(date: string) {
-    const res = await api.get(`/files/${date}/download`, { responseType: 'blob' })
-    const url = URL.createObjectURL(res.data as Blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${date}.md`
-    a.click()
-    URL.revokeObjectURL(url)
+    try {
+      const res = await api.get(`/files/${date}/download`, { responseType: 'blob' })
+      const url = URL.createObjectURL(res.data as Blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${date}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Download failed')
+    }
   }
 
   async function handleDelete(date: string) {
     if (!confirm(`Delete ${date}?`)) return
-    await api.delete(`/files/${date}`)
-    setDates((prev) => prev.filter((d) => d !== date))
+    try {
+      await api.delete(`/files/${date}`)
+      setDates((prev) => prev.filter((d) => d !== date))
+    } catch {
+      alert('Delete failed')
+    }
   }
 
   return (

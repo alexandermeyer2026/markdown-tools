@@ -1,6 +1,5 @@
 import axios from 'axios'
-
-const TOKEN_KEY = 'journal_token'
+import { TOKEN_KEY } from '../constants'
 
 const api = axios.create({
   baseURL: '/api',

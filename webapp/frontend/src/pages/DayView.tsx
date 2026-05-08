@@ -52,6 +52,8 @@ export default function DayView() {
     try {
       const { data } = await api.get(`/tasks/${date}`)
       setTasks(data.tasks)
+    } catch {
+      alert('Failed to load tasks')
     } finally {
       setLoading(false)
     }
