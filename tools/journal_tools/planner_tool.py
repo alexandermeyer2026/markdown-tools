@@ -305,7 +305,8 @@ class PlannerTool:
             with open(day.file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
             for task in status_changed:
-                lines[task.line_number - 1] = task.to_line() + '\n'
+                if 0 < task.line_number <= len(lines):
+                    lines[task.line_number - 1] = task.to_line() + '\n'
             FileWriter.write_atomic(day.file_path, lines)
 
         # Phase 1.5: remove carried-forward subtask lines from source files.
@@ -366,6 +367,28 @@ class PlannerTool:
                 all_tasks = TaskParser.parse_file(path)
                 timed = [t for t in all_tasks if t.time is not None and t.parent is None]
                 FileWriter.sort_timed_tasks(path, timed, all_tasks)
+
+        # Refresh line numbers for all modified files.
+        # Tasks moved between days retain stale line_numbers from their source file;
+        # re-parsing each touched file and matching by content fixes this so Phase 1
+        # on the next save doesn't try to write to an out-of-range line.
+        for key, day in cache.items():
+            if not day.file_path or day.file_path not in backed_up:
+                continue
+            if not os.path.exists(day.file_path):
+                continue
+            try:
+                fresh = TaskParser.parse_file(day.file_path)
+                ln_by_content: dict[str, int] = {}
+                for t in PlannerTool._flatten_tasks(fresh):
+                    ln_by_content.setdefault(t.to_line(), t.line_number)
+                for task in PlannerTool._flatten_tasks(day.task_list):
+                    new_ln = ln_by_content.get(task.to_line())
+                    if new_ln is not None:
+                        task.line_number = new_ln
+                day.original_lines = {t.line_number: t.to_line() for t in PlannerTool._flatten_tasks(fresh)}
+            except Exception:
+                pass
 
         # Reset the baseline so changes aren't re-detected after this save
         for day in cache.values():
@@ -507,9 +530,13 @@ class PlannerTool:
                     day = state.week_days[col]
                     day_key = day.isoformat()
 
-                    # Save pending changes so the day planner reads up-to-date files
+                    # Prompt to save pending changes so the day planner reads up-to-date files
                     if PlannerTool._cache_has_changes(state.cache):
-                        PlannerTool._save_cache(state.cache, state.directory)
+                        sys.stdout.write('\x1b[2J\x1b[H')
+                        sys.stdout.flush()
+                        if input("Save changes? [y/n]: ").strip().lower() == 'y':
+                            PlannerTool._save_cache(state.cache, state.directory)
+                            print("✓ Changes saved")
 
                     # Reload the target day (file may have been created by _save_cache)
                     PlannerTool._reload_day_in_cache(state.cache, day, state.directory)
