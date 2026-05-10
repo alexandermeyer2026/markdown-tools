@@ -167,6 +167,9 @@ class UpdateTool:
                 lines.append(pad(
                     f"  {RED}{icon}{RESET}  {GRAY}{date.strftime('%a %-d %b')}{RESET}  {task.title}"
                 ))
+                for child in task.children:
+                    cicon = STATUS_ICONS.get(child.status, '○')
+                    lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
         return lines
 
     @staticmethod
@@ -204,6 +207,9 @@ class UpdateTool:
             icon  = STATUS_ICONS.get(task.status, '○')
             color = STATUS_COLORS.get(task.status, GRAY)
             lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
+            for child in task.children:
+                cicon = STATUS_ICONS.get(child.status, '○')
+                lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
 
         return lines
 
@@ -226,6 +232,10 @@ class UpdateTool:
                 color       = STATUS_COLORS.get(task.status, GRAY)
                 time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
                 lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
+                if not task.time:
+                    for child in task.children:
+                        cicon = STATUS_ICONS.get(child.status, '○')
+                        lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
         return lines
 
     @staticmethod
