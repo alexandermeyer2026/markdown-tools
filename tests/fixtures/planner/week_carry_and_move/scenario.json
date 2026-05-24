@@ -1,0 +1,6 @@
+{
+  "args": ["week"],
+  "week_today": "2024-02-05",
+  "keys": [">", "j", "L", "q"],
+  "save": true
+}

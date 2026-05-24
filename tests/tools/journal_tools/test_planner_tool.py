@@ -267,6 +267,9 @@ class PlannerIntegrationTest(unittest.TestCase):
     def test_week_carry_forward(self):
         self._run_fixture('week_carry_forward')
 
+    def test_week_carry_and_move(self):
+        self._run_fixture('week_carry_and_move')
+
 
 class TestInteractivePlanSubtasks(unittest.TestCase):
     CONTENT = (

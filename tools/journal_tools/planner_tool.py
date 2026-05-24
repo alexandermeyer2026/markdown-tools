@@ -309,26 +309,35 @@ class PlannerTool:
                     lines[task.line_number - 1] = task.to_line() + '\n'
             FileWriter.write_atomic(day.file_path, lines)
 
-        # Phase 1.5: remove carried-forward subtask lines from source files.
+        # Combined Phase 1.5 + 2: collect ALL line removals per source file and apply
+        # in a single pass. Doing them sequentially (old Phase 1.5 then Phase 2) caused
+        # Phase 2 to use stale line numbers after Phase 1.5 had already shifted lines.
+
+        # Read each source file once so block extraction and removal use the same content.
+        src_lines: dict = {}
+
+        def _read_src(path):
+            if path not in src_lines:
+                with open(path, 'r', encoding='utf-8') as f:
+                    src_lines[path] = f.readlines()
+            return src_lines[path]
+
+        remove_set: dict = {}   # file_path -> set of 1-based line numbers to remove
+        pastes: list = []       # (dst_key, dst_file_path, block) to paste after removals
+
+        # Collect carried-forward subtask removals (old Phase 1.5).
         for key, day in cache.items():
             if not day.moved_subtasks or not day.file_path:
                 continue
-            if day.file_path not in backed_up:
-                BackupManager.backup(day.file_path, directory)
-                backed_up.add(day.file_path)
-            with open(day.file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            lines_to_remove: set[int] = set()
+            lines = _read_src(day.file_path)
+            rs = remove_set.setdefault(day.file_path, set())
             for subtask in day.moved_subtasks:
                 for t in PlannerTool._flatten_tasks([subtask]):
                     if 0 < t.line_number <= len(lines):
-                        lines_to_remove.add(t.line_number)
-            if lines_to_remove:
-                remaining = [line for i, line in enumerate(lines, 1) if i not in lines_to_remove]
-                FileWriter.write_atomic(day.file_path, remaining)
+                        rs.add(t.line_number)
             day.moved_subtasks.clear()
 
-        # Phase 2: task moves — cut from source files, paste to destination files.
+        # Collect task-move removals and capture blocks (old Phase 2).
         for key, day in cache.items():
             if not day.file_path:
                 continue
@@ -341,24 +350,56 @@ class PlannerTool:
             departed = [(t, dst) for t, dst in departed if dst is not None and dst != key]
             if not departed:
                 continue
-            if day.file_path not in backed_up:
-                BackupManager.backup(day.file_path, directory)
-                backed_up.add(day.file_path)
-            # Process in reverse line order so earlier line numbers stay valid
-            departed.sort(key=lambda x: x[0].line_number, reverse=True)
+
+            lines = _read_src(day.file_path)
+            sorted_all = sorted(day.all_tasks, key=lambda t: t.line_number)
+            rs = remove_set.setdefault(day.file_path, set())
+
             for task, dst_key in departed:
+                # Compute the block range from the pre-removal file content.
+                task_indent_len = len(task.indent)
+                next_boundary = None
+                found = False
+                for t in sorted_all:
+                    if found:
+                        if len(t.indent) <= task_indent_len:
+                            next_boundary = t.line_number
+                            break
+                    elif t.line_number == task.line_number:
+                        found = True
+                start = task.line_number - 1  # 0-based
+                end = (next_boundary - 1) if next_boundary is not None else len(lines)
+                block = lines[start:end]
+
+                for ln in range(start + 1, end + 1):  # 1-based
+                    rs.add(ln)
+
                 dst_day = cache[dst_key]
                 if dst_day.file_path is None:
                     dst_path = os.path.join(directory, f"{dst_key}.md")
                     with open(dst_path, 'w'):
                         pass
                     dst_day.file_path = dst_path
-                if dst_day.file_path not in backed_up:
-                    BackupManager.backup(dst_day.file_path, directory)
-                    backed_up.add(dst_day.file_path)
-                block = FileWriter.cut_task(day.file_path, task, day.all_tasks)
-                FileWriter.paste_task(dst_day.file_path, block)
-                dst_keys_written.add(dst_key)
+                pastes.append((dst_key, dst_day.file_path, block))
+
+        # Apply all removals per source file in one pass.
+        for file_path, ln_set in remove_set.items():
+            if not ln_set:
+                continue
+            if file_path not in backed_up:
+                BackupManager.backup(file_path, directory)
+                backed_up.add(file_path)
+            lines = _read_src(file_path)
+            remaining = [line for i, line in enumerate(lines, 1) if i not in ln_set]
+            FileWriter.write_atomic(file_path, remaining)
+
+        # Paste departed task blocks to their destination files.
+        for dst_key, dst_path, block in pastes:
+            if dst_path not in backed_up:
+                BackupManager.backup(dst_path, directory)
+                backed_up.add(dst_path)
+            FileWriter.paste_task(dst_path, block)
+            dst_keys_written.add(dst_key)
 
         # Sort timed tasks in destination files
         for dst_key in dst_keys_written:
