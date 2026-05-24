@@ -73,6 +73,16 @@ class TestSave(unittest.TestCase):
         PlannerTool._save(self.path, self.directory, [], [], {}, [])
         self.assertFalse(os.path.exists(self.path + '.tmp'))
 
+    def test_new_task_on_file_with_trailing_blank_has_single_gap(self):
+        # File ending with a trailing blank line must not produce a double blank gap
+        # before the new task. sort_timed_tasks only fixes this when >=2 timed tasks
+        # exist; with an untimed file the bug survives unfixed.
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Buy milk\n\n")
+        new_task = Task(title='Call dentist', status='todo', time=None, line_number=-1, indent='')
+        PlannerTool._save(self.path, self.directory, [], [], {}, [new_task])
+        self.assertEqual(self._read(), "- [ ] Buy milk\n\n- [ ] Call dentist\n")
+
 
 @pytest.mark.integration
 class TestInteractivePlan(unittest.TestCase):

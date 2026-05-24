@@ -718,7 +718,7 @@ class PlannerTool:
                 lines[task.line_number - 1] = task.to_line() + '\n'
 
         for task in new_tasks:
-            if lines:
+            if lines and lines[-1] != '\n':
                 lines.append('\n')
             lines.append(task.to_line() + '\n')
 
