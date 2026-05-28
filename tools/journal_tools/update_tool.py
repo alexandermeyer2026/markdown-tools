@@ -220,12 +220,14 @@ class UpdateTool:
         if not upcoming_by_date:
             lines.append(pad(f"  {GRAY}–{RESET}"))
             return lines
-        for date in sorted(upcoming_by_date):
+        for i, date in enumerate(sorted(upcoming_by_date)):
             tasks = upcoming_by_date[date]
             timed   = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
             untimed = [t for t in tasks if not t.time]
             delta = (date - today).days
             label = f"Tomorrow, {date.strftime('%-d %b')}" if delta == 1 else date.strftime('%A, %-d %b')
+            if i > 0:
+                lines.append(' ' * col_w)
             lines.append(pad(f"  {BOLD}{label}{RESET}"))
             for task in timed + untimed:
                 icon        = STATUS_ICONS.get(task.status, '○')
