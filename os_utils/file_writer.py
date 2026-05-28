@@ -131,6 +131,8 @@ class FileWriter:
         try:
             with open(tmp, 'w', encoding='utf-8') as f:
                 f.writelines(lines)
+                if lines and not lines[-1].endswith('\n'):
+                    f.write('\n')
             os.replace(tmp, file_path)
         except Exception:
             if os.path.exists(tmp):
