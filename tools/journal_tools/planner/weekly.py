@@ -1,0 +1,326 @@
+import datetime
+import os
+import shutil
+import sys
+
+from models import Task, top_level_tasks
+from os_utils import BackupManager, FileFinder, FileWriter
+from parser import TaskParser
+from tools.journal_tools.rendering import (
+    STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RESET,
+    get_minutes, ansi_truncate_pad,
+)
+from .state import DayCache, WeekState
+from .utils import flatten_tasks, task_to_lines, week_expanded
+
+DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+
+def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCache:
+    key = day.isoformat()
+    if key not in cache:
+        files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
+        if files:
+            all_tasks = TaskParser.parse_file(files[0])
+            tl = list(top_level_tasks(all_tasks))
+            cache[key] = DayCache(
+                file_path=files[0],
+                all_tasks=all_tasks,
+                task_list=tl,
+                original_task_list=list(tl),
+                original_lines={t.line_number: t.to_line() for t in all_tasks},
+            )
+        else:
+            cache[key] = DayCache(
+                file_path=None,
+                all_tasks=[],
+                task_list=[],
+                original_task_list=[],
+                original_lines={},
+            )
+    return cache[key]
+
+
+def reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None:
+    """Re-parse a day's file and replace its cache entry with a fresh baseline."""
+    key = day.isoformat()
+    files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
+    if files:
+        all_tasks = TaskParser.parse_file(files[0])
+        tl = list(top_level_tasks(all_tasks))
+        cache[key] = DayCache(
+            file_path=files[0],
+            all_tasks=all_tasks,
+            task_list=tl,
+            original_task_list=list(tl),
+            original_lines={t.line_number: t.to_line() for t in all_tasks},
+        )
+    else:
+        cache[key] = DayCache(None, [], [], [], {})
+
+
+def cache_has_changes(cache: dict) -> bool:
+    for day in cache.values():
+        if day.new_tasks or day.moved_subtasks:
+            return True
+        current_ids = {id(t) for t in day.task_list}
+        orig_ids = {id(t) for t in day.original_task_list}
+        if current_ids != orig_ids:
+            return True
+        for task in flatten_tasks(day.original_task_list):
+            if task.line_number > 0 and day.original_lines.get(task.line_number) != task.to_line():
+                return True
+    return False
+
+
+def save_cache(cache: dict, directory: str) -> None:
+    """Write all pending changes from the cache to disk (no prompt)."""
+    backed_up: set = set()
+    dst_keys_written: set = set()
+
+    # Phase 0: new tasks — append to destination files before any removals.
+    for key, day in cache.items():
+        if not day.new_tasks:
+            continue
+        if day.file_path is None:
+            day.file_path = os.path.join(directory, f"{key}.md")
+            with open(day.file_path, 'w', encoding='utf-8'):
+                pass
+        if day.file_path not in backed_up:
+            BackupManager.backup(day.file_path, directory)
+            backed_up.add(day.file_path)
+        for task in day.new_tasks:
+            FileWriter.paste_task(day.file_path, task_to_lines(task))
+        day.new_tasks.clear()
+
+    # Build reverse lookup: id(task) -> date key (where the task currently lives)
+    task_location: dict = {}
+    for key, day in cache.items():
+        for task in day.task_list:
+            task_location[id(task)] = key
+
+    # Phase 1: status changes — save to each task's ORIGINAL day before any cuts.
+    # This includes tasks that will be moved away, so the cut block carries the new status.
+    for key, day in cache.items():
+        if not day.file_path:
+            continue
+        status_changed = [
+            t for t in flatten_tasks(day.original_task_list)
+            if t.line_number > 0
+            and day.original_lines.get(t.line_number) != t.to_line()
+        ]
+        if not status_changed:
+            continue
+        if day.file_path not in backed_up:
+            BackupManager.backup(day.file_path, directory)
+            backed_up.add(day.file_path)
+        with open(day.file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        for task in status_changed:
+            if 0 < task.line_number <= len(lines):
+                lines[task.line_number - 1] = task.to_line() + '\n'
+        FileWriter.write_atomic(day.file_path, lines)
+
+    # Combined Phase 1.5 + 2: collect ALL line removals per source file and apply
+    # in a single pass. Doing them sequentially (old Phase 1.5 then Phase 2) caused
+    # Phase 2 to use stale line numbers after Phase 1.5 had already shifted lines.
+
+    # Read each source file once so block extraction and removal use the same content.
+    src_lines: dict = {}
+
+    def _read_src(path):
+        if path not in src_lines:
+            with open(path, 'r', encoding='utf-8') as f:
+                src_lines[path] = f.readlines()
+        return src_lines[path]
+
+    remove_set: dict = {}   # file_path -> set of 1-based line numbers to remove
+    pastes: list = []       # (dst_key, dst_file_path, block) to paste after removals
+
+    # Collect carried-forward subtask removals (old Phase 1.5).
+    for key, day in cache.items():
+        if not day.moved_subtasks or not day.file_path:
+            continue
+        lines = _read_src(day.file_path)
+        rs = remove_set.setdefault(day.file_path, set())
+        for subtask in day.moved_subtasks:
+            for t in flatten_tasks([subtask]):
+                if 0 < t.line_number <= len(lines):
+                    rs.add(t.line_number)
+        day.moved_subtasks.clear()
+
+    # Collect task-move removals and capture blocks (old Phase 2).
+    for key, day in cache.items():
+        if not day.file_path:
+            continue
+        current_ids = {id(t) for t in day.task_list}
+        departed = [
+            (t, task_location.get(id(t)))
+            for t in day.original_task_list
+            if id(t) not in current_ids
+        ]
+        departed = [(t, dst) for t, dst in departed if dst is not None and dst != key]
+        if not departed:
+            continue
+
+        lines = _read_src(day.file_path)
+        sorted_all = sorted(day.all_tasks, key=lambda t: t.line_number)
+        rs = remove_set.setdefault(day.file_path, set())
+
+        for task, dst_key in departed:
+            # Compute the block range from the pre-removal file content.
+            task_indent_len = len(task.indent)
+            next_boundary = None
+            found = False
+            for t in sorted_all:
+                if found:
+                    if len(t.indent) <= task_indent_len:
+                        next_boundary = t.line_number
+                        break
+                elif t.line_number == task.line_number:
+                    found = True
+            start = task.line_number - 1  # 0-based
+            end = (next_boundary - 1) if next_boundary is not None else len(lines)
+            block = lines[start:end]
+
+            for ln in range(start + 1, end + 1):  # 1-based
+                rs.add(ln)
+
+            dst_day = cache[dst_key]
+            if dst_day.file_path is None:
+                dst_path = os.path.join(directory, f"{dst_key}.md")
+                with open(dst_path, 'w'):
+                    pass
+                dst_day.file_path = dst_path
+            pastes.append((dst_key, dst_day.file_path, block))
+
+    # Apply all removals per source file in one pass.
+    for file_path, ln_set in remove_set.items():
+        if not ln_set:
+            continue
+        if file_path not in backed_up:
+            BackupManager.backup(file_path, directory)
+            backed_up.add(file_path)
+        lines = _read_src(file_path)
+        remaining = [line for i, line in enumerate(lines, 1) if i not in ln_set]
+        FileWriter.write_atomic(file_path, remaining)
+
+    # Paste departed task blocks to their destination files.
+    for dst_key, dst_path, block in pastes:
+        if dst_path not in backed_up:
+            BackupManager.backup(dst_path, directory)
+            backed_up.add(dst_path)
+        FileWriter.paste_task(dst_path, block)
+        dst_keys_written.add(dst_key)
+
+    # Sort timed tasks in destination files
+    for dst_key in dst_keys_written:
+        path = cache[dst_key].file_path
+        if path and os.path.exists(path):
+            all_tasks = TaskParser.parse_file(path)
+            timed = [t for t in all_tasks if t.time is not None and t.parent is None]
+            FileWriter.sort_timed_tasks(path, timed, all_tasks)
+
+    # Refresh line numbers for all modified files.
+    # Tasks moved between days retain stale line_numbers from their source file;
+    # re-parsing each touched file and matching by content fixes this so Phase 1
+    # on the next save doesn't try to write to an out-of-range line.
+    for key, day in cache.items():
+        if not day.file_path or day.file_path not in backed_up:
+            continue
+        if not os.path.exists(day.file_path):
+            continue
+        try:
+            fresh = TaskParser.parse_file(day.file_path)
+            ln_by_content: dict[str, int] = {}
+            for t in flatten_tasks(fresh):
+                ln_by_content.setdefault(t.to_line(), t.line_number)
+            for task in flatten_tasks(day.task_list):
+                new_ln = ln_by_content.get(task.to_line())
+                if new_ln is not None:
+                    task.line_number = new_ln
+            day.original_lines = {t.line_number: t.to_line() for t in flatten_tasks(fresh)}
+        except Exception:
+            pass
+
+    # Reset the baseline so changes aren't re-detected after this save
+    for day in cache.values():
+        day.original_task_list = list(day.task_list)
+
+
+def week_cell(task: Task | None, col_width: int, is_selected: bool) -> str:
+    prefix = '> ' if is_selected else '  '
+    if task is None:
+        text = prefix.ljust(col_width)
+        return f'\x1b[7m{text}{RESET}' if is_selected else text
+    icon = STATUS_ICONS.get(task.status, '?')
+    if task.parent is not None:
+        depth = 0
+        p = task.parent
+        while p is not None:
+            depth += 1
+            p = p.parent
+        title_max = max(col_width - 4 - depth, 1)
+        title_str = task.title[:title_max].ljust(title_max)
+        if is_selected:
+            return f'\x1b[7m> {" " * depth}{icon} {title_str}{RESET}'
+        return f'  {" " * depth}{GRAY}{icon} {title_str}{RESET}'
+    color     = STATUS_COLORS.get(task.status, GRAY)
+    title_max = col_width - 4  # 2 prefix + 1 icon + 1 space
+    title_str = task.title[:title_max].ljust(title_max)
+    if is_selected:
+        return f'\x1b[7m{prefix}{icon} {title_str}{RESET}'
+    return f'{prefix}{color}{icon}{RESET} {title_str}'
+
+
+def render_week(state: WeekState, cursor_col: int, cursor_row: int):
+    cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+    col_width = max((cols - 2) // 7, 10)
+    margin = '  '
+    today = datetime.date.today()
+
+    lines = []
+    monday, sunday = state.week_days[0], state.week_days[-1]
+    lines.append(f"{margin}{BOLD}Week {monday.strftime('%b %d')} – {sunday.strftime('%b %d, %Y')}{RESET}\n")
+
+    header = margin
+    for i, day in enumerate(state.week_days):
+        label = f"{DAY_NAMES[i]} {day.strftime('%m/%d')}"
+        padded = label.ljust(col_width)
+        if cursor_row == -1 and i == cursor_col:
+            header += f"\x1b[7m{padded}{RESET}"
+        elif day == today:
+            header += f"{BOLD}{padded}{RESET}"
+        else:
+            header += padded
+    lines.append(header)
+    lines.append(margin + ('─' * (col_width - 1) + ' ') * 7)
+
+    expanded_per_col = [week_expanded(state.week_tasks[i]) for i in range(7)]
+    max_rows = max(max((len(e) for e in expanded_per_col), default=0), 1)
+    for row in range(max_rows):
+        line = margin
+        for col_idx in range(7):
+            exp = expanded_per_col[col_idx]
+            is_sel = (col_idx == cursor_col and row == cursor_row)
+            if row < len(exp):
+                line += week_cell(exp[row], col_width, is_sel)
+            elif is_sel:
+                line += week_cell(None, col_width, True)
+            else:
+                line += ' ' * col_width
+        lines.append(line)
+
+    lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task  [>] carry subtasks  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
+
+    padded_lines = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
+    sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded_lines) + '\x1b[J\x1b[?25h')
+    sys.stdout.flush()
+
+
+def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:
+    if not state.week_tasks[src_col] or not (0 <= cursor_row < len(state.week_tasks[src_col])):
+        return cursor_row
+    task = state.week_tasks[src_col].pop(cursor_row)
+    state.week_tasks[dst_col].append(task)
+    return len(state.week_tasks[dst_col]) - 1

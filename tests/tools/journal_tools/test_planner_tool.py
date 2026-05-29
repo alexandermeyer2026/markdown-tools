@@ -12,7 +12,9 @@ import pytest
 
 from models import Task, TaskTime, minutes_to_time
 from parser.task_parser import TaskParser
-from tools.journal_tools.planner_tool import PlannerTool, WeekState, DayCache
+from tools.journal_tools.planner import PlannerTool, WeekState, DayCache
+from tools.journal_tools.planner.daily import save as planner_save, has_changes as planner_has_changes
+from tools.journal_tools.planner.weekly import cache_has_changes
 
 JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
@@ -54,23 +56,23 @@ class TestSave(unittest.TestCase):
     def test_unchanged_task_not_touched(self):
         task = Task(title='Meeting', status='todo',
                     time=TaskTime(start='9:00', end='10:00'), line_number=3, indent='')
-        PlannerTool._save(self.path, self.directory, [task], [],
+        planner_save(self.path, self.directory, [task], [],
                           {3: task.to_line()}, [])
         self.assertEqual(self._read(), self.CONTENT)
 
     def test_task_with_unknown_line_number_not_written(self):
         task = Task(title='Ghost', status='done', time=None, line_number=99, indent='')
-        PlannerTool._save(self.path, self.directory, [task], [], {}, [])
+        planner_save(self.path, self.directory, [task], [], {}, [])
         self.assertEqual(self._read(), self.CONTENT)
 
     def test_backup_created(self):
-        PlannerTool._save(self.path, self.directory, [], [], {}, [])
+        planner_save(self.path, self.directory, [], [], {}, [])
         backup_dir = os.path.join(self.directory, '.backups')
         self.assertTrue(os.path.exists(backup_dir))
         self.assertEqual(len(os.listdir(backup_dir)), 1)
 
     def test_atomic_write_leaves_no_tmp(self):
-        PlannerTool._save(self.path, self.directory, [], [], {}, [])
+        planner_save(self.path, self.directory, [], [], {}, [])
         self.assertFalse(os.path.exists(self.path + '.tmp'))
 
     def test_new_task_on_file_with_trailing_blank_has_single_gap(self):
@@ -80,7 +82,7 @@ class TestSave(unittest.TestCase):
         with open(self.path, 'w', encoding='utf-8') as f:
             f.write("- [ ] Buy milk\n\n")
         new_task = Task(title='Call dentist', status='todo', time=None, line_number=-1, indent='')
-        PlannerTool._save(self.path, self.directory, [], [], {}, [new_task])
+        planner_save(self.path, self.directory, [], [], {}, [new_task])
         self.assertEqual(self._read(), "- [ ] Buy milk\n\n- [ ] Call dentist\n")
 
 
@@ -117,10 +119,10 @@ class TestInteractivePlan(unittest.TestCase):
             captured['untimed'] = list(untimed)
             captured['new']     = list(new)
 
-        with patch.object(PlannerTool, 'read_key', side_effect=keys):
-            with patch.object(PlannerTool, 'render'):
+        with patch('tools.journal_tools.planner._read_key', side_effect=keys):
+            with patch('tools.journal_tools.planner._render'):
                 with patch('builtins.input', side_effect=inputs or []):
-                    with patch.object(PlannerTool, '_save', side_effect=capture_save):
+                    with patch('tools.journal_tools.planner._save', side_effect=capture_save):
                         PlannerTool.interactive_plan(self.directory, self.path, self.tasks)
 
         return captured
@@ -234,7 +236,7 @@ class PlannerIntegrationTest(unittest.TestCase):
                 shutil.copy(os.path.join(JOURNAL_DIR, fname), os.path.join(tmpdir, fname))
 
             patches = [
-                patch.object(PlannerTool, 'read_key', side_effect=lambda: next(key_iter)),
+                patch('tools.journal_tools.planner._read_key', side_effect=lambda: next(key_iter)),
                 patch('builtins.input', return_value=save_answer),
                 patch('sys.stdout', new=StringIO()),
             ]
@@ -245,7 +247,7 @@ class PlannerIntegrationTest(unittest.TestCase):
                 mock_dt.date.today.return_value = fixed
                 mock_dt.timedelta = datetime.timedelta
                 mock_dt.datetime = datetime.datetime
-                patches.append(patch('tools.journal_tools.planner_tool.datetime', mock_dt))
+                patches.append(patch('tools.journal_tools.planner.datetime', mock_dt))
 
             with contextlib.ExitStack() as stack:
                 for p in patches:
@@ -311,10 +313,10 @@ class TestInteractivePlanSubtasks(unittest.TestCase):
             captured['untimed'] = list(untimed)
             captured['new']     = list(new)
 
-        with patch.object(PlannerTool, 'read_key', side_effect=keys):
-            with patch.object(PlannerTool, 'render'):
+        with patch('tools.journal_tools.planner._read_key', side_effect=keys):
+            with patch('tools.journal_tools.planner._render'):
                 with patch('builtins.input', side_effect=inputs or []):
-                    with patch.object(PlannerTool, '_save', side_effect=capture_save):
+                    with patch('tools.journal_tools.planner._save', side_effect=capture_save):
                         PlannerTool.interactive_plan(self.directory, self.path, self.tasks)
 
         return captured
@@ -346,9 +348,9 @@ class TestInteractivePlanSubtasks(unittest.TestCase):
         parent = self.tasks[0]
         child  = self.tasks[1]
         original_lines = {t.line_number: t.to_line() for t in self.tasks}
-        self.assertFalse(PlannerTool._has_changes([parent], [], original_lines, []))
+        self.assertFalse(planner_has_changes([parent], [], original_lines, []))
         child.status = 'done'
-        self.assertTrue(PlannerTool._has_changes([parent], [], original_lines, []))
+        self.assertTrue(planner_has_changes([parent], [], original_lines, []))
 
 
 class TestInteractiveWeekNavigation(unittest.TestCase):
@@ -376,9 +378,9 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
 
     def _run(self, keys, start_col=None, tasks_by_col=None, start_row=0):
         state = self._make_state(tasks_by_col=tasks_by_col)
-        with patch.object(PlannerTool, 'read_key', side_effect=keys):
-            with patch.object(PlannerTool, 'render_week'):
-                with patch.object(PlannerTool, '_ensure_day_loaded'):
+        with patch('tools.journal_tools.planner._read_key', side_effect=keys):
+            with patch('tools.journal_tools.planner._render_week'):
+                with patch('tools.journal_tools.planner._ensure_day_loaded'):
                     with patch('sys.stdout'):
                         return PlannerTool.interactive_week(state, start_col=start_col, start_row=start_row)
 
@@ -429,10 +431,10 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
         prev_cache = MagicMock(file_path=None, task_list=[])
         state.cache[prev_day.isoformat()] = prev_cache
 
-        with patch.object(PlannerTool, 'read_key', side_effect=['H', 'q']):
-            with patch.object(PlannerTool, 'render_week'):
-                with patch.object(PlannerTool, '_ensure_day_loaded',
-                                  side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), prev_cache)):
+        with patch('tools.journal_tools.planner._read_key', side_effect=['H', 'q']):
+            with patch('tools.journal_tools.planner._render_week'):
+                with patch('tools.journal_tools.planner._ensure_day_loaded',
+                           side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), prev_cache)):
                     with patch('sys.stdout'):
                         direction, row = PlannerTool.interactive_week(state, start_col=0)
 
@@ -449,10 +451,10 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
         next_cache = MagicMock(file_path=None, task_list=[])
         state.cache[next_day.isoformat()] = next_cache
 
-        with patch.object(PlannerTool, 'read_key', side_effect=['L', 'q']):
-            with patch.object(PlannerTool, 'render_week'):
-                with patch.object(PlannerTool, '_ensure_day_loaded',
-                                  side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), next_cache)):
+        with patch('tools.journal_tools.planner._read_key', side_effect=['L', 'q']):
+            with patch('tools.journal_tools.planner._render_week'):
+                with patch('tools.journal_tools.planner._ensure_day_loaded',
+                           side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), next_cache)):
                     with patch('sys.stdout'):
                         direction, row = PlannerTool.interactive_week(state, start_col=6)
 
@@ -493,9 +495,9 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
         tasks_by_col = [[parent]] + [[] for _ in range(6)]
         state = self._make_state(tasks_by_col=tasks_by_col)
 
-        with patch.object(PlannerTool, 'read_key', side_effect=['>', 'q']):
-            with patch.object(PlannerTool, 'render_week'):
-                with patch.object(PlannerTool, '_ensure_day_loaded'):
+        with patch('tools.journal_tools.planner._read_key', side_effect=['>', 'q']):
+            with patch('tools.journal_tools.planner._render_week'):
+                with patch('tools.journal_tools.planner._ensure_day_loaded'):
                     PlannerTool.interactive_week(state, start_col=0)
 
         self.assertEqual(parent.children, [child_done])
@@ -512,9 +514,9 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
 
         tuesday_key = (self.MONDAY + datetime.timedelta(days=1)).isoformat()
 
-        with patch.object(PlannerTool, 'read_key', side_effect=['>', 'q']):
-            with patch.object(PlannerTool, 'render_week'):
-                with patch.object(PlannerTool, '_ensure_day_loaded'):
+        with patch('tools.journal_tools.planner._read_key', side_effect=['>', 'q']):
+            with patch('tools.journal_tools.planner._render_week'):
+                with patch('tools.journal_tools.planner._ensure_day_loaded'):
                     PlannerTool.interactive_week(state, start_col=0)
 
         tuesday_tasks = state.cache[tuesday_key].task_list
@@ -535,9 +537,9 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
 
         tuesday_key = (self.MONDAY + datetime.timedelta(days=1)).isoformat()
 
-        with patch.object(PlannerTool, 'read_key', side_effect=['>', 'q']):
-            with patch.object(PlannerTool, 'render_week'):
-                with patch.object(PlannerTool, '_ensure_day_loaded'):
+        with patch('tools.journal_tools.planner._read_key', side_effect=['>', 'q']):
+            with patch('tools.journal_tools.planner._render_week'):
+                with patch('tools.journal_tools.planner._ensure_day_loaded'):
                     PlannerTool.interactive_week(state, start_col=0)
 
         self.assertEqual(parent.children, [child_done])
@@ -564,13 +566,13 @@ class TestWeekCacheChanges(unittest.TestCase):
                       children=[child])
         child.parent = parent
         cache = self._make_cache([parent, child])
-        self.assertFalse(PlannerTool._cache_has_changes(cache))
+        self.assertFalse(cache_has_changes(cache))
 
     def test_parent_status_change_detected(self):
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
         cache = self._make_cache([parent])
         parent.status = 'done'
-        self.assertTrue(PlannerTool._cache_has_changes(cache))
+        self.assertTrue(cache_has_changes(cache))
 
     def test_subtask_status_change_detected(self):
         child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
@@ -579,4 +581,4 @@ class TestWeekCacheChanges(unittest.TestCase):
         child.parent = parent
         cache = self._make_cache([parent, child])
         child.status = 'done'
-        self.assertTrue(PlannerTool._cache_has_changes(cache))
+        self.assertTrue(cache_has_changes(cache))
