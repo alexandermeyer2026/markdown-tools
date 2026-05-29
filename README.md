@@ -106,8 +106,12 @@ markdown-tools/
 ├── models/                 # Data models
 ├── parser/                 # Markdown parsing utilities
 ├── os_utils/               # File system utilities
-└── tools/                  # Tool implementations
-    └── journal_tools/      # Journal tools (timeline, catch-up, planner, update)
+├── tools/                  # Tool implementations
+│   └── journal_tools/      # Journal tools (timeline, catch-up, planner, update)
+└── webapp/                 # Optional self-hosted web interface
+    ├── backend/            # FastAPI backend
+    ├── frontend/           # React frontend
+    └── nginx/              # Nginx reverse proxy config
 ```
 
 ## Contributing
