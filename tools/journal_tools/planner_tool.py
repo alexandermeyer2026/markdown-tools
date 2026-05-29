@@ -43,10 +43,6 @@ class PlannerTool:
     @staticmethod
     def run(args, directory='.'):
         if not args:
-            print("Usage: journal planner <today|yesterday|tomorrow|YYYY-MM-DD|week|file>")
-            return
-
-        if args[0].lower() == 'week':
             PlannerTool.run_week(directory)
             return
 
