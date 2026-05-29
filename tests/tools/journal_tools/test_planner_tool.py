@@ -14,6 +14,7 @@ from models import Task, TaskTime, minutes_to_time
 from parser.task_parser import TaskParser
 from tools.journal_tools.planner import PlannerTool, WeekState, DayCache
 from tools.journal_tools.planner.daily import save as planner_save, has_changes as planner_has_changes
+from tools.journal_tools.planner.utils import task_to_lines
 from tools.journal_tools.planner.weekly import cache_has_changes
 
 JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
@@ -575,3 +576,156 @@ class TestWeekCacheChanges(unittest.TestCase):
         cache = self._make_cache([parent, child])
         child.status = 'done'
         self.assertTrue(cache_has_changes(cache))
+
+
+class TestTaskToLines(unittest.TestCase):
+    def test_simple_todo(self):
+        task = Task(title='Buy milk', status='todo', time=None, line_number=1, indent='')
+        self.assertEqual(task_to_lines(task), ['- [ ] Buy milk\n'])
+
+    def test_done_task(self):
+        task = Task(title='Buy milk', status='done', time=None, line_number=1, indent='')
+        self.assertEqual(task_to_lines(task), ['- [x] Buy milk\n'])
+
+    def test_timed_task(self):
+        task = Task(title='Meeting', status='todo',
+                    time=TaskTime(start='9:00', end='10:00'), line_number=1, indent='')
+        self.assertEqual(task_to_lines(task), ['- [ ] 9:00-10:00 Meeting\n'])
+
+    def test_with_child(self):
+        child = Task(title='Sub', status='done', time=None, line_number=2, indent='  ')
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                      children=[child])
+        child.parent = parent
+        self.assertEqual(task_to_lines(parent), ['- [ ] Parent\n', '  - [x] Sub\n'])
+
+    def test_deeply_nested(self):
+        grandchild = Task(title='Leaf', status='todo', time=None, line_number=3, indent='    ')
+        child = Task(title='Mid', status='todo', time=None, line_number=2, indent='  ',
+                     children=[grandchild])
+        parent = Task(title='Root', status='todo', time=None, line_number=1, indent='',
+                      children=[child])
+        grandchild.parent = child
+        child.parent = parent
+        self.assertEqual(task_to_lines(parent),
+                         ['- [ ] Root\n', '  - [ ] Mid\n', '    - [ ] Leaf\n'])
+
+
+class TestInteractiveWeekEnterKey(unittest.TestCase):
+    MONDAY = datetime.date(2024, 1, 15)
+
+    def _make_state(self, file_path='/tmp/planner_test.md'):
+        week_days = [self.MONDAY + datetime.timedelta(days=i) for i in range(7)]
+        cache = {}
+        for i, day in enumerate(week_days):
+            cache[day.isoformat()] = DayCache(
+                file_path=file_path if i == 0 else None,
+                all_tasks=[],
+                task_list=[],
+                original_task_list=[],
+                original_lines={},
+            )
+        return WeekState(week_days=week_days, directory='/tmp', cache=cache)
+
+    def test_enter_on_task_row_is_noop(self):
+        task = Task(title='Task', status='todo', time=None, line_number=1, indent='')
+        state = self._make_state()
+        state.day(0).task_list = [task]
+        state.day(0).original_task_list = [task]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['\r', 'q']))
+            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
+            mock_plan = stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
+            stack.enter_context(patch('sys.stdout'))
+            PlannerTool.interactive_week(state, start_col=0, start_row=0)
+        mock_plan.assert_not_called()
+
+    def test_enter_on_header_opens_day_planner(self):
+        state = self._make_state(file_path='/tmp/planner_test.md')
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
+            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
+            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=False))
+            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache'))
+            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
+            mock_parser.parse_file.return_value = []
+            mock_plan = stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
+            stack.enter_context(patch('sys.stdout'))
+            PlannerTool.interactive_week(state, start_col=0)
+        mock_plan.assert_called_once()
+        self.assertEqual(mock_plan.call_args[0][1], '/tmp/planner_test.md')
+
+    def test_enter_with_changes_save_yes_calls_save_cache(self):
+        state = self._make_state()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
+            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
+            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=True))
+            mock_save = stack.enter_context(patch('tools.journal_tools.planner._save_cache'))
+            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache'))
+            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
+            mock_parser.parse_file.return_value = []
+            stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
+            stack.enter_context(patch('builtins.input', return_value='y'))
+            stack.enter_context(patch('sys.stdout'))
+            PlannerTool.interactive_week(state, start_col=0)
+        mock_save.assert_called_once()
+
+    def test_enter_with_changes_save_no_skips_save_cache(self):
+        state = self._make_state()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
+            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
+            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=True))
+            mock_save = stack.enter_context(patch('tools.journal_tools.planner._save_cache'))
+            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache'))
+            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
+            mock_parser.parse_file.return_value = []
+            stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
+            stack.enter_context(patch('builtins.input', return_value='n'))
+            stack.enter_context(patch('sys.stdout'))
+            PlannerTool.interactive_week(state, start_col=0)
+        mock_save.assert_not_called()
+
+    def test_enter_reloads_day_before_and_after_plan(self):
+        state = self._make_state(file_path='/tmp/planner_test.md')
+        reload_days = []
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
+            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
+            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=False))
+            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache',
+                                      side_effect=lambda c, d, dr: reload_days.append(d)))
+            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
+            mock_parser.parse_file.return_value = []
+            stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
+            stack.enter_context(patch('sys.stdout'))
+            PlannerTool.interactive_week(state, start_col=0)
+        self.assertEqual(len(reload_days), 2)
+        self.assertEqual(reload_days[0], reload_days[1])
+
+
+class TestRunWeekSaveOnExit(unittest.TestCase):
+    def _run(self, has_changes, save_answer='n'):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(PlannerTool, 'interactive_week', return_value=(0, 0)))
+            stack.enter_context(patch('tools.journal_tools.planner._ensure_day_loaded'))
+            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=has_changes))
+            mock_save = stack.enter_context(patch('tools.journal_tools.planner._save_cache'))
+            mock_input = stack.enter_context(patch('builtins.input', return_value=save_answer))
+            stack.enter_context(patch('sys.stdout'))
+            PlannerTool.run_week('/tmp')
+        return mock_save, mock_input
+
+    def test_no_changes_does_not_prompt_or_save(self):
+        mock_save, mock_input = self._run(has_changes=False)
+        mock_input.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_changes_save_yes_calls_save_cache(self):
+        mock_save, _ = self._run(has_changes=True, save_answer='y')
+        mock_save.assert_called_once()
+
+    def test_changes_save_no_skips_save_cache(self):
+        mock_save, _ = self._run(has_changes=True, save_answer='n')
+        mock_save.assert_not_called()
