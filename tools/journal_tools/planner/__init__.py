@@ -8,7 +8,7 @@ from parser import TaskParser
 from tools.journal_tools.rendering import get_minutes, minutes_to_time
 
 from .state import DayCache, WeekState
-from .utils import read_key as _read_key, flatten_tasks as _flatten_tasks, root_task as _root_task, week_expanded as _week_expanded
+from .utils import read_key as _read_key, flatten_tasks as _flatten_tasks, week_expanded as _week_expanded
 from .daily import render as _render, has_changes as _has_changes, save as _save
 from .weekly import (
     DAY_NAMES as _DAY_NAMES,
@@ -17,7 +17,7 @@ from .weekly import (
     cache_has_changes as _cache_has_changes,
     save_cache as _save_cache,
     render_week as _render_week,
-    move_task_week as _move_task_week,
+    shift_task as _shift_task,
 )
 
 
@@ -71,14 +71,7 @@ class PlannerTool:
             for day in week_days:
                 _ensure_day_loaded(cache, day, directory)
 
-            state = WeekState(
-                week_days=week_days,
-                week_tasks=[cache[d.isoformat()].task_list for d in week_days],
-                file_paths=[cache[d.isoformat()].file_path for d in week_days],
-                all_tasks_per_day=[cache[d.isoformat()].all_tasks for d in week_days],
-                directory=directory,
-                cache=cache,
-            )
+            state = WeekState(week_days=week_days, directory=directory, cache=cache)
 
             result, start_row = PlannerTool.interactive_week(state, start_col=start_col, start_row=start_row)
 
@@ -96,7 +89,7 @@ class PlannerTool:
 
     @staticmethod
     def interactive_week(state: WeekState, start_col: int | None = None, start_row: int = 0) -> tuple[int, int]:
-        cursor_col = start_col if start_col is not None else next((i for i, t in enumerate(state.week_tasks) if t), 0)
+        cursor_col = start_col if start_col is not None else next((i for i in range(7) if state.day(i).task_list), 0)
         cursor_row = start_row
 
         while True:
@@ -135,15 +128,12 @@ class PlannerTool:
 
                     # Reload the day after the day planner closes
                     _reload_day_in_cache(state.cache, day, state.directory)
-                    state.week_tasks[col] = state.cache[day_key].task_list
-                    state.file_paths[col] = state.cache[day_key].file_path
-                    state.all_tasks_per_day[col] = state.cache[day_key].all_tasks
 
             elif key == 'j':
                 if cursor_row == -1:
                     cursor_row = 0
                 else:
-                    exp = _week_expanded(state.week_tasks[cursor_col])
+                    exp = _week_expanded(state.day(cursor_col).task_list)
                     if exp:
                         cursor_row = min(cursor_row + 1, len(exp) - 1)
 
@@ -155,7 +145,7 @@ class PlannerTool:
                     return -1, 0
                 cursor_col -= 1
                 if cursor_row >= 0:
-                    exp = _week_expanded(state.week_tasks[cursor_col])
+                    exp = _week_expanded(state.day(cursor_col).task_list)
                     cursor_row = min(cursor_row, max(len(exp) - 1, 0))
 
             elif key == 'l':
@@ -163,54 +153,26 @@ class PlannerTool:
                     return 1, 0
                 cursor_col += 1
                 if cursor_row >= 0:
-                    exp = _week_expanded(state.week_tasks[cursor_col])
+                    exp = _week_expanded(state.day(cursor_col).task_list)
                     cursor_row = min(cursor_row, max(len(exp) - 1, 0))
 
             elif key in ('t', 'i', 'd', 'f') and cursor_row >= 0:
-                exp = _week_expanded(state.week_tasks[cursor_col])
+                exp = _week_expanded(state.day(cursor_col).task_list)
                 if cursor_row < len(exp):
                     exp[cursor_row].status = {'t': 'todo', 'i': 'in progress', 'd': 'done', 'f': 'failed'}[key]
 
-            elif key == 'H' and cursor_row >= 0 and state.week_tasks[cursor_col]:
-                exp = _week_expanded(state.week_tasks[cursor_col])
-                if cursor_row < len(exp):
-                    root = _root_task(exp[cursor_row])
-                    root_idx = state.week_tasks[cursor_col].index(root)
-                    if cursor_col > 0:
-                        _move_task_week(state, cursor_col, cursor_col - 1, root_idx)
-                        cursor_col -= 1
-                        new_exp = _week_expanded(state.week_tasks[cursor_col])
-                        cursor_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
-                    else:
-                        prev_day = state.week_days[0] - datetime.timedelta(days=1)
-                        _ensure_day_loaded(state.cache, prev_day, state.directory)
-                        state.week_tasks[cursor_col].pop(root_idx)
-                        state.cache[prev_day.isoformat()].task_list.append(root)
-                        prev_exp = _week_expanded(state.cache[prev_day.isoformat()].task_list)
-                        new_row = next((i for i, t in enumerate(prev_exp) if t is root), len(prev_exp) - 1)
-                        return -1, new_row
+            elif key == 'H' and cursor_row >= 0 and state.day(cursor_col).task_list:
+                cursor_col, cursor_row, week_exit = _shift_task(state, cursor_col, cursor_row, -1)
+                if week_exit:
+                    return week_exit, cursor_row
 
-            elif key == 'L' and cursor_row >= 0 and state.week_tasks[cursor_col]:
-                exp = _week_expanded(state.week_tasks[cursor_col])
-                if cursor_row < len(exp):
-                    root = _root_task(exp[cursor_row])
-                    root_idx = state.week_tasks[cursor_col].index(root)
-                    if cursor_col < 6:
-                        _move_task_week(state, cursor_col, cursor_col + 1, root_idx)
-                        cursor_col += 1
-                        new_exp = _week_expanded(state.week_tasks[cursor_col])
-                        cursor_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
-                    else:
-                        next_day = state.week_days[6] + datetime.timedelta(days=1)
-                        _ensure_day_loaded(state.cache, next_day, state.directory)
-                        state.week_tasks[cursor_col].pop(root_idx)
-                        state.cache[next_day.isoformat()].task_list.append(root)
-                        next_exp = _week_expanded(state.cache[next_day.isoformat()].task_list)
-                        new_row = next((i for i, t in enumerate(next_exp) if t is root), len(next_exp) - 1)
-                        return 1, new_row
+            elif key == 'L' and cursor_row >= 0 and state.day(cursor_col).task_list:
+                cursor_col, cursor_row, week_exit = _shift_task(state, cursor_col, cursor_row, 1)
+                if week_exit:
+                    return week_exit, cursor_row
 
             elif key == '>' and cursor_row >= 0:
-                exp = _week_expanded(state.week_tasks[cursor_col])
+                exp = _week_expanded(state.day(cursor_col).task_list)
                 if cursor_row < len(exp):
                     task = exp[cursor_row]
                     if task.parent is None:

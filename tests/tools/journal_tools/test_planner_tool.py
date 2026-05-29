@@ -367,14 +367,7 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
                 original_task_list=list(week_tasks[i]), original_lines={},
                 new_tasks=[], moved_subtasks=[],
             )
-        return WeekState(
-            week_days=week_days,
-            week_tasks=week_tasks,
-            file_paths=[None] * 7,
-            all_tasks_per_day=[[] for _ in range(7)],
-            directory='/tmp',
-            cache=cache,
-        )
+        return WeekState(week_days=week_days, directory='/tmp', cache=cache)
 
     def _run(self, keys, start_col=None, tasks_by_col=None, start_row=0):
         state = self._make_state(tasks_by_col=tasks_by_col)
@@ -433,13 +426,13 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
 
         with patch('tools.journal_tools.planner._read_key', side_effect=['H', 'q']):
             with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner._ensure_day_loaded',
+                with patch('tools.journal_tools.planner.weekly.ensure_day_loaded',
                            side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), prev_cache)):
                     with patch('sys.stdout'):
                         direction, row = PlannerTool.interactive_week(state, start_col=0)
 
         self.assertEqual(direction, -1)
-        self.assertEqual(state.week_tasks[0], [])   # task removed from Monday
+        self.assertEqual(state.day(0).task_list, [])   # task removed from Monday
         self.assertEqual(prev_cache.task_list, [task])  # task in prev Sunday
         self.assertEqual(row, 0)                    # cursor at first (only) row
 
@@ -453,13 +446,13 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
 
         with patch('tools.journal_tools.planner._read_key', side_effect=['L', 'q']):
             with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner._ensure_day_loaded',
+                with patch('tools.journal_tools.planner.weekly.ensure_day_loaded',
                            side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), next_cache)):
                     with patch('sys.stdout'):
                         direction, row = PlannerTool.interactive_week(state, start_col=6)
 
         self.assertEqual(direction, 1)
-        self.assertEqual(state.week_tasks[6], [])   # task removed from Sunday
+        self.assertEqual(state.day(6).task_list, [])   # task removed from Sunday
         self.assertEqual(next_cache.task_list, [task])  # task in next Monday
         self.assertEqual(row, 0)
 

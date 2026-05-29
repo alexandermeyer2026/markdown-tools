@@ -15,8 +15,8 @@ class DayCache:
 @dataclass
 class WeekState:
     week_days: list
-    week_tasks: list         # list references into cache DayCache.task_list
-    file_paths: list
-    all_tasks_per_day: list
     directory: str
     cache: dict              # date ISO string -> DayCache
+
+    def day(self, col: int) -> 'DayCache':
+        return self.cache[self.week_days[col].isoformat()]
