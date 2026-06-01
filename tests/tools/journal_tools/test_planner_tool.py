@@ -283,6 +283,49 @@ class PlannerIntegrationTest(unittest.TestCase):
     def test_week_carry_and_move(self):
         self._run_fixture('week_carry_and_move')
 
+    def test_week_carry_then_cross_week_move(self):
+        # Carry subtasks from Saturday to Sunday, then move the new task to Monday next week.
+        # The bug: the carried-over task was written to Sunday because new_tasks wasn't
+        # migrated when shift_task crossed the week boundary.
+        fixture_name = 'week_carry_then_cross_week_move'
+        fixture_dir = os.path.join(FIXTURES_DIR, fixture_name)
+        with open(os.path.join(fixture_dir, 'scenario.json')) as f:
+            config = json.load(f)
+
+        key_iter = iter(config['keys'])
+        fixed = datetime.date.fromisoformat(config['week_today'])
+        mock_dt = MagicMock()
+        mock_dt.date.today.return_value = fixed
+        mock_dt.timedelta = datetime.timedelta
+        mock_dt.datetime = datetime.datetime
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            for fname in os.listdir(JOURNAL_DIR):
+                shutil.copy(os.path.join(JOURNAL_DIR, fname), os.path.join(tmpdir, fname))
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=lambda: next(key_iter)))
+                stack.enter_context(patch('builtins.input', return_value='y'))
+                stack.enter_context(patch('sys.stdout', new=StringIO()))
+                stack.enter_context(patch('tools.journal_tools.planner.datetime', mock_dt))
+                PlannerTool.run([], directory=tmpdir)
+
+            expected_dir = os.path.join(fixture_dir, 'expected')
+            for fname in sorted(os.listdir(expected_dir)):
+                with open(os.path.join(expected_dir, fname)) as f:
+                    expected = f.read()
+                with open(os.path.join(tmpdir, fname)) as f:
+                    actual = f.read()
+                self.assertEqual(actual, expected, f"Mismatch in {fname}")
+
+            self.assertFalse(
+                os.path.exists(os.path.join(tmpdir, '2024-01-28.md')),
+                "Carry-over task must not be written to Sunday when moved to Monday",
+            )
+        finally:
+            shutil.rmtree(tmpdir)
+
 
 class TestInteractivePlanSubtasks(unittest.TestCase):
     CONTENT = (

@@ -340,6 +340,11 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
     root_idx = tasks.index(root)
     dst_col = cursor_col + direction
     if 0 <= dst_col <= 6:
+        src_day = state.cache[state.week_days[cursor_col].isoformat()]
+        dst_day = state.cache[state.week_days[dst_col].isoformat()]
+        if root in src_day.new_tasks:
+            src_day.new_tasks.remove(root)
+            dst_day.new_tasks.append(root)
         move_task_week(state, cursor_col, dst_col, root_idx)
         new_exp = week_expanded(state.day(dst_col).task_list)
         new_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
@@ -348,6 +353,11 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
         edge_day = state.week_days[0 if direction == -1 else 6]
         adj_day = edge_day + datetime.timedelta(days=direction)
         ensure_day_loaded(state.cache, adj_day, state.directory)
+        src_day = state.cache[state.week_days[cursor_col].isoformat()]
+        dst_day = state.cache[adj_day.isoformat()]
+        if root in src_day.new_tasks:
+            src_day.new_tasks.remove(root)
+            dst_day.new_tasks.append(root)
         tasks.pop(root_idx)
         state.cache[adj_day.isoformat()].task_list.append(root)
         adj_exp = week_expanded(state.cache[adj_day.isoformat()].task_list)
