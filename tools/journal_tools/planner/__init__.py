@@ -195,7 +195,6 @@ class PlannerTool:
                                 child.parent = new_task
                             tomorrow_key = tomorrow.isoformat()
                             state.cache[tomorrow_key].task_list.append(new_task)
-                            state.cache[tomorrow_key].new_tasks.append(new_task)
 
     # ── Daily planner ─────────────────────────────────────────────────────────
 

@@ -61,7 +61,7 @@ def reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None
 
 def cache_has_changes(cache: dict) -> bool:
     for day in cache.values():
-        if day.new_tasks or day.moved_subtasks:
+        if day.moved_subtasks:
             return True
         current_ids = {id(t) for t in day.task_list}
         orig_ids = {id(t) for t in day.original_task_list}
@@ -123,7 +123,8 @@ def save_cache(cache: dict, directory: str) -> None:
 
     # Write new in-session tasks before any removals so they land at current line numbers.
     for key, day in cache.items():
-        if not day.new_tasks:
+        new_tasks = [t for t in day.task_list if t.line_number == -1]
+        if not new_tasks:
             continue
         if day.file_path is None:
             day.file_path = os.path.join(directory, f"{key}.md")
@@ -132,9 +133,8 @@ def save_cache(cache: dict, directory: str) -> None:
         if day.file_path not in backed_up:
             BackupManager.backup(day.file_path, directory)
             backed_up.add(day.file_path)
-        for task in day.new_tasks:
+        for task in new_tasks:
             FileWriter.paste_task(day.file_path, task_to_lines(task))
-        day.new_tasks.clear()
 
     # Build reverse lookup: id(task) -> date key (where the task currently lives).
     task_location: dict = {id(t): key for key, day in cache.items() for t in day.task_list}
@@ -340,11 +340,6 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
     root_idx = tasks.index(root)
     dst_col = cursor_col + direction
     if 0 <= dst_col <= 6:
-        src_day = state.cache[state.week_days[cursor_col].isoformat()]
-        dst_day = state.cache[state.week_days[dst_col].isoformat()]
-        if root in src_day.new_tasks:
-            src_day.new_tasks.remove(root)
-            dst_day.new_tasks.append(root)
         move_task_week(state, cursor_col, dst_col, root_idx)
         new_exp = week_expanded(state.day(dst_col).task_list)
         new_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
@@ -353,11 +348,6 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
         edge_day = state.week_days[0 if direction == -1 else 6]
         adj_day = edge_day + datetime.timedelta(days=direction)
         ensure_day_loaded(state.cache, adj_day, state.directory)
-        src_day = state.cache[state.week_days[cursor_col].isoformat()]
-        dst_day = state.cache[adj_day.isoformat()]
-        if root in src_day.new_tasks:
-            src_day.new_tasks.remove(root)
-            dst_day.new_tasks.append(root)
         tasks.pop(root_idx)
         state.cache[adj_day.isoformat()].task_list.append(root)
         adj_exp = week_expanded(state.cache[adj_day.isoformat()].task_list)

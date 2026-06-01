@@ -8,7 +8,6 @@ class DayCache:
     task_list: list          # current top-level tasks (mutable, shared with WeekState)
     original_task_list: list # snapshot at load time (for change detection)
     original_lines: dict     # {line_number: original to_line()} for status detection
-    new_tasks: list = field(default_factory=list)       # tasks created in-session (no line number)
     moved_subtasks: list = field(default_factory=list)  # subtasks removed from parents in this day
 
 

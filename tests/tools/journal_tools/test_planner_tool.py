@@ -409,7 +409,7 @@ class TestInteractiveWeekNavigation(unittest.TestCase):
             cache[day.isoformat()] = MagicMock(
                 file_path=None, all_tasks=[], task_list=week_tasks[i],
                 original_task_list=list(week_tasks[i]), original_lines={},
-                new_tasks=[], moved_subtasks=[],
+                moved_subtasks=[],
             )
         return WeekState(week_days=week_days, directory='/tmp', cache=cache)
 
