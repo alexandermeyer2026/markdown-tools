@@ -161,6 +161,9 @@ class DayGrid(Widget, can_focus=True):
         bar_width = max(end_slot - start_slot + 1, 1)
         offset = start_slot
 
+        icon_col = offset + bar_width + len(task.time.to_str()) + 2
+        title_max = max(self.size.width - icon_col - 4, 0)
+
         t = Text(_MARGIN)
         if is_sel:
             t.append(" " * max(offset - 2, 0))
@@ -170,20 +173,21 @@ class DayGrid(Widget, can_focus=True):
         t.append("█" * bar_width, style=style)
         t.append(f" {task.time.to_str()} ")
         t.append(icon, style=style)
-        t.append(f" {task.title}", style="bold")
+        t.append(f" {task.title[:title_max]}", style="bold")
         return t
 
     def _untimed_task_row(self, task: Task, selected: Task | None) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
         style = STATUS_STYLES.get(task.status, "bright_black")
         is_sel = task is selected
+        title_max = max(self.size.width - 4, 0)
         t = Text()
         if is_sel:
             t.append("> ", style="reverse")
         else:
             t.append("  ")
         t.append(icon, style=style)
-        t.append(f" {task.title}", style="bold")
+        t.append(f" {task.title[:title_max]}", style="bold")
         return t
 
     def _subtask_rows(self, task: Task, selected: Task | None, depth: int = 1, time_offset: int = 0) -> list[Text]:
@@ -191,14 +195,15 @@ class DayGrid(Widget, can_focus=True):
         for child in task.children:
             icon = STATUS_ICONS.get(child.status, "?")
             leading = " " * time_offset + "  " * depth
+            title_max = max(self.size.width - len(leading) - 4, 0)
             t = Text(_MARGIN)
             if child is selected:
                 t.append(leading[:-2])
-                t.append(f"> {icon} {child.title}", style="reverse")
+                t.append(f"> {icon} {child.title[:title_max]}", style="reverse")
             else:
                 t.append(leading)
                 t.append(icon, style="bright_black")
-                t.append(f" {child.title}", style="bright_black")
+                t.append(f" {child.title[:title_max]}", style="bright_black")
             rows.append(t)
             rows.extend(self._subtask_rows(child, selected, depth + 1, time_offset))
         return rows
