@@ -46,6 +46,7 @@ class WeekGrid(Widget, can_focus=True):
         Binding("f",     "status_failed",     show=False),
         Binding("enter", "open_or_edit",      show=False),
         Binding("n",     "new_task",          show=False),
+        Binding("D",     "delete_task",       show=False),
         Binding("s",     "save",              show=False),
         Binding("q",     "quit",              show=False),
         Binding("ctrl+c","quit",              show=False),
@@ -311,6 +312,21 @@ class WeekGrid(Widget, can_focus=True):
         for child in unfinished:
             child.parent = new_task
         self._state.cache[tomorrow.isoformat()].task_list.append(new_task)
+        self.refresh()
+
+    def action_delete_task(self) -> None:
+        task = self._selected_task()
+        if task is None:
+            return
+        day_key = self._selected_day().isoformat()
+        day_cache = self._cache[day_key]
+        if task.parent is None:
+            day_cache.task_list.remove(task)
+        else:
+            task.parent.children.remove(task)
+        if task.line_number > 0:
+            day_cache.deleted_tasks.append(task)
+        self._clamp_row()
         self.refresh()
 
     # ── Screen-push actions ───────────────────────────────────────────────────

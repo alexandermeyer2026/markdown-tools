@@ -55,7 +55,7 @@ def reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None
 
 def cache_has_changes(cache: dict) -> bool:
     for day in cache.values():
-        if day.moved_subtasks:
+        if day.moved_subtasks or day.deleted_tasks:
             return True
         current_ids = {id(t) for t in day.task_list}
         orig_ids = {id(t) for t in day.original_task_list}
@@ -154,6 +154,35 @@ def save_cache(cache: dict, directory: str) -> None:
             if 0 < task.line_number <= len(lines):
                 lines[task.line_number - 1] = task.to_line() + '\n'
         FileWriter.write_atomic(day.file_path, lines)
+
+    # Remove deleted tasks.
+    for key, day in cache.items():
+        if not day.deleted_tasks or not day.file_path:
+            continue
+        if day.file_path not in backed_up:
+            BackupManager.backup(day.file_path, directory)
+            backed_up.add(day.file_path)
+        with open(day.file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        all_lns = sorted(day.original_lines.keys())
+        to_remove: set = set()
+        for task in day.deleted_tasks:
+            if task.line_number <= 0:
+                continue
+            task_indent = len(task.indent)
+            block_end = all_lns[-1] if all_lns else task.line_number
+            found = False
+            for ln in all_lns:
+                if found:
+                    orig = day.original_lines[ln]
+                    if len(orig) - len(orig.lstrip()) <= task_indent:
+                        block_end = ln - 1
+                        break
+                elif ln == task.line_number:
+                    found = True
+            to_remove.update(range(task.line_number, block_end + 1))
+        FileWriter.write_atomic(day.file_path, [ln for i, ln in enumerate(lines, 1) if i not in to_remove])
+        day.deleted_tasks.clear()
 
     # Collect all line removals in one pass before applying any of them.
     # Applying removals sequentially would shift line numbers and corrupt later reads.

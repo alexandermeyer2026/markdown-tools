@@ -44,6 +44,7 @@ class DayGrid(Widget, can_focus=True):
         Binding("f",     "status_failed", show=False),
         Binding("enter", "edit_task",     show=False),
         Binding("n",     "new_task",      show=False),
+        Binding("D",     "delete_task",   show=False),
         Binding("s",     "save",          show=False),
         Binding("q",     "quit",          show=False),
         Binding("ctrl+c","quit",          show=False),
@@ -64,6 +65,7 @@ class DayGrid(Widget, can_focus=True):
         self._timed_tasks: list[Task] = []
         self._untimed_tasks: list[Task] = []
         self._new_tasks: list[Task] = []
+        self._deleted_tasks: list[Task] = []
         self._original_lines: dict[int, str] = {}
 
     def on_mount(self) -> None:
@@ -222,7 +224,8 @@ class DayGrid(Widget, can_focus=True):
 
     def _has_changes(self) -> bool:
         return has_changes(
-            self._timed_tasks, self._untimed_tasks, self._original_lines, self._new_tasks
+            self._timed_tasks, self._untimed_tasks, self._original_lines,
+            self._new_tasks, self._deleted_tasks,
         )
 
     def _do_save(self) -> None:
@@ -233,6 +236,7 @@ class DayGrid(Widget, can_focus=True):
             self._untimed_tasks,
             self._original_lines,
             self._new_tasks,
+            self._deleted_tasks,
         )
 
     # ── Navigation ────────────────────────────────────────────────────────────
@@ -399,6 +403,27 @@ class DayGrid(Widget, can_focus=True):
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(), on_result)
+
+    def action_delete_task(self) -> None:
+        task = self._selected()
+        if task is None:
+            return
+        if task.parent is None:
+            if task in self._timed_tasks:
+                self._timed_tasks.remove(task)
+            else:
+                self._untimed_tasks.remove(task)
+            if task in self._new_tasks:
+                self._new_tasks.remove(task)
+            elif task.line_number > 0:
+                self._deleted_tasks.append(task)
+        else:
+            task.parent.children.remove(task)
+            if task.line_number > 0:
+                self._deleted_tasks.append(task)
+        nav = self._navigable()
+        self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
+        self.refresh()
 
     # ── Save / quit ───────────────────────────────────────────────────────────
 

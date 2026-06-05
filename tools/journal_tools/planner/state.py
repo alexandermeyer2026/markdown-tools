@@ -9,6 +9,7 @@ class DayCache:
     original_task_list: list # snapshot at load time (for change detection)
     original_lines: dict     # {line_number: original to_line()} for status detection
     moved_subtasks: list = field(default_factory=list)  # subtasks removed from parents in this day
+    deleted_tasks: list = field(default_factory=list)   # root tasks deleted in this day
 
 
 @dataclass
