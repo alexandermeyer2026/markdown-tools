@@ -167,13 +167,14 @@ class DayGrid(Widget, can_focus=True):
         t = Text(_MARGIN)
         if is_sel:
             t.append(" " * max(offset - 2, 0))
-            t.append("> ", style="reverse")
+            t.append("> ")
         else:
             t.append(" " * offset)
         t.append("█" * bar_width, style=style)
         t.append(f" {task.time.to_str()} ")
         t.append(icon, style=style)
-        t.append(f" {task.title[:title_max]}", style="bold")
+        t.append(" ")
+        t.append(task.title[:title_max], style="bold reverse" if is_sel else "bold")
         return t
 
     def _untimed_task_row(self, task: Task, selected: Task | None) -> Text:
@@ -181,13 +182,10 @@ class DayGrid(Widget, can_focus=True):
         style = STATUS_STYLES.get(task.status, "bright_black")
         is_sel = task is selected
         title_max = max(self.size.width - 4, 0)
-        t = Text()
-        if is_sel:
-            t.append("> ", style="reverse")
-        else:
-            t.append("  ")
+        t = Text("> " if is_sel else "  ")
         t.append(icon, style=style)
-        t.append(f" {task.title[:title_max]}", style="bold")
+        t.append(" ")
+        t.append(task.title[:title_max], style="bold reverse" if is_sel else "bold")
         return t
 
     def _subtask_rows(self, task: Task, selected: Task | None, depth: int = 1, time_offset: int = 0) -> list[Text]:
@@ -198,8 +196,11 @@ class DayGrid(Widget, can_focus=True):
             title_max = max(self.size.width - len(leading) - 4, 0)
             t = Text(_MARGIN)
             if child is selected:
-                t.append(leading[:-2])
-                t.append(f"> {icon} {child.title[:title_max]}", style="reverse")
+                t.append(leading[:-2] if len(leading) >= 2 else leading)
+                t.append("> ")
+                t.append(icon)
+                t.append(" ")
+                t.append(child.title[:title_max], style="reverse")
             else:
                 t.append(leading)
                 t.append(icon, style="bright_black")

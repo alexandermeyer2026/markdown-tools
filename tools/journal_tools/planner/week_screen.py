@@ -162,22 +162,24 @@ class WeekGrid(Widget, can_focus=True):
             indent = "  " * depth
             title_max = max(col_width - 4 - depth * 2, 1)
             title_str = task.title[:title_max].ljust(title_max)
-            t = Text()
+            t = Text("  ")
             if is_selected:
-                t.append(f"> {indent}{icon} {title_str}"[:col_width], style="reverse")
+                t.append(indent[:-2] if len(indent) >= 2 else "")
+                t.append("> ")
+                t.append(icon)
             else:
-                t.append(f"  {indent}{icon} {title_str}"[:col_width], style="bright_black")
+                t.append(indent, style="bright_black")
+                t.append(icon, style="bright_black")
+            t.append(" ")
+            t.append(title_str, style="reverse" if is_selected else "bright_black")
             return t
 
         title_max = col_width - 4
         title_str = task.title[:title_max].ljust(title_max)
-        t = Text()
-        if is_selected:
-            t.append(f"> {icon} {title_str}"[:col_width], style="reverse")
-        else:
-            t.append("  ")
-            t.append(icon, style=style)
-            t.append(f" {title_str}"[:col_width - 3])
+        t = Text("> " if is_selected else "  ")
+        t.append(icon, style=style)
+        t.append(" ")
+        t.append(title_str, style="reverse" if is_selected else "")
         return t
 
     # ── Helpers ───────────────────────────────────────────────────────────────
