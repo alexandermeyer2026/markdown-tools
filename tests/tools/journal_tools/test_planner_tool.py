@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import datetime
 import json
@@ -5,22 +6,24 @@ import os
 import shutil
 import tempfile
 import unittest
-from io import StringIO
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from models import Task, TaskTime, minutes_to_time
-from parser.task_parser import TaskParser
-from tools.journal_tools.planner import PlannerTool, WeekState, DayCache
+from os_utils import FileFinder, resolve_date
+from tools.journal_tools.planner import WeekState, DayCache
+from tools.journal_tools.planner.app import PlannerApp
 from tools.journal_tools.planner.daily import save as planner_save, has_changes as planner_has_changes
+from tools.journal_tools.planner.day_screen import DayGrid
+from tools.journal_tools.planner.save_dialog import SaveDialog
+from tools.journal_tools.planner.task_form_screen import TaskFormScreen, TaskFormResult
+from tools.journal_tools.planner.week_screen import WeekGrid
 from tools.journal_tools.planner.utils import task_to_lines
 from tools.journal_tools.planner.weekly import cache_has_changes
 
 JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
-
-
 
 
 @pytest.mark.integration
@@ -87,247 +90,7 @@ class TestSave(unittest.TestCase):
         self.assertEqual(self._read(), "- [ ] Buy milk\n\n- [ ] Call dentist\n")
 
 
-@pytest.mark.integration
-class TestInteractivePlan(unittest.TestCase):
-    CONTENT = (
-        "# Journal\n"
-        "\n"
-        "- [ ] 9:00-10:00 Meeting\n"
-        "- [ ] Buy milk\n"
-    )
-    STEP_M = int(PlannerTool.STEP_SIZE_HOURS * 60)
-
-    def setUp(self):
-        self.tmp = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.md', delete=False, encoding='utf-8'
-        )
-        self.tmp.write(self.CONTENT)
-        self.tmp.close()
-        self.path = self.tmp.name
-        self.directory = os.path.dirname(self.path)
-        self.tasks = TaskParser.parse_file(self.path)
-
-    def tearDown(self):
-        if os.path.exists(self.path):
-            os.unlink(self.path)
-
-    def _run(self, keys, inputs=None):
-        """Run interactive_plan and return args passed to _save (or {} if not called)."""
-        captured = {}
-
-        def capture_save(file_path, directory, timed, untimed, orig, new):
-            captured['timed']   = list(timed)
-            captured['untimed'] = list(untimed)
-            captured['new']     = list(new)
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=keys):
-            with patch('tools.journal_tools.planner._render'):
-                with patch('builtins.input', side_effect=inputs or []):
-                    with patch('tools.journal_tools.planner._save', side_effect=capture_save):
-                        PlannerTool.interactive_plan(self.directory, self.path, self.tasks)
-
-        return captured
-
-    def test_quit_no_changes_does_not_save(self):
-        result = self._run(['q'])
-        self.assertEqual(result, {})
-
-    def test_quit_discard_does_not_save(self):
-        result = self._run(['l', 'q'], inputs=['n'])
-        self.assertEqual(result, {})
-
-    def test_shift_right(self):
-        result = self._run(['l', 'q'], inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, minutes_to_time(540 + self.STEP_M))
-        self.assertEqual(task.time.end,   minutes_to_time(600 + self.STEP_M))
-
-    def test_shift_left(self):
-        result = self._run(['h', 'q'], inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, minutes_to_time(540 - self.STEP_M))
-        self.assertEqual(task.time.end,   minutes_to_time(600 - self.STEP_M))
-
-    def test_shift_clamps_at_zero(self):
-        presses = 540 // self.STEP_M + 5  # enough to reach 0:00 from 9:00
-        keys = ['h'] * presses + ['q']
-        result = self._run(keys, inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, '0:00')
-        self.assertEqual(task.time.end, minutes_to_time(60))  # duration preserved
-
-    def test_extend_end_time(self):
-        result = self._run(['L', 'q'], inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, '9:00')
-        self.assertEqual(task.time.end, minutes_to_time(600 + self.STEP_M))
-
-    def test_shrink_end_time(self):
-        result = self._run(['H', 'q'], inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, '9:00')
-        self.assertEqual(task.time.end, minutes_to_time(600 - self.STEP_M))
-
-    def test_shrink_fuses_at_minimum_duration(self):
-        # shrink until end == start → fuses to start-time only (task is 9:00-10:00 = 60 min)
-        presses = 60 // self.STEP_M
-        result = self._run(['H'] * presses + ['q'], inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, '9:00')
-        self.assertIsNone(task.time.end)
-
-    def test_extend_creates_end_time(self):
-        # j to untimed task, l to schedule at noon, L to add end time
-        result = self._run(['j', 'l', 'L', 'q'], inputs=['y'])
-        milk = next(t for t in result['timed'] if t.title == 'Buy milk')
-        self.assertEqual(milk.time.start, '12:00')
-        self.assertEqual(milk.time.end, minutes_to_time(720 + self.STEP_M))
-
-    def test_untimed_task_moves_to_noon(self):
-        result = self._run(['j', 'l', 'q'], inputs=['y'])
-        timed_titles = [t.title for t in result['timed']]
-        self.assertIn('Buy milk', timed_titles)
-        milk = next(t for t in result['timed'] if t.title == 'Buy milk')
-        self.assertEqual(milk.time.start, '12:00')
-
-    def test_navigation_does_not_change_tasks(self):
-        # j then k returns to first task; l shifts it
-        result = self._run(['j', 'k', 'l', 'q'], inputs=['y'])
-        task = result['timed'][0]
-        self.assertEqual(task.time.start, minutes_to_time(540 + self.STEP_M))
-
-    def test_new_task_added_to_untimed(self):
-        result = self._run(['n', 'q'], inputs=['Call dentist', 'y'])
-        untimed_titles = [t.title for t in result['untimed']]
-        self.assertIn('Call dentist', untimed_titles)
-
-    def test_new_task_empty_title_ignored(self):
-        result = self._run(['n', 'q'], inputs=['', 'q'])
-        self.assertEqual(result, {})
-
-    def test_remove_time_moves_task_to_untimed(self):
-        result = self._run(['r', 'q'], inputs=['y'])
-        timed_titles   = [t.title for t in result['timed']]
-        untimed_titles = [t.title for t in result['untimed']]
-        self.assertNotIn('Meeting', timed_titles)
-        self.assertIn('Meeting', untimed_titles)
-        meeting = next(t for t in result['untimed'] if t.title == 'Meeting')
-        self.assertIsNone(meeting.time)
-
-    def test_remove_time_on_untimed_task_is_noop(self):
-        result = self._run(['j', 'r', 'q'])
-        self.assertEqual(result, {})
-
-
-class PlannerIntegrationTest(unittest.TestCase):
-
-    def _run_fixture(self, fixture_name):
-        fixture_dir = os.path.join(FIXTURES_DIR, fixture_name)
-        with open(os.path.join(fixture_dir, 'scenario.json')) as f:
-            config = json.load(f)
-
-        args = config['args']
-        key_iter = iter(config['keys'])
-        save_answer = 'y' if config.get('save', False) else 'n'
-        week_today = config.get('week_today')
-
-        tmpdir = tempfile.mkdtemp()
-        try:
-            for fname in os.listdir(JOURNAL_DIR):
-                shutil.copy(os.path.join(JOURNAL_DIR, fname), os.path.join(tmpdir, fname))
-
-            patches = [
-                patch('tools.journal_tools.planner._read_key', side_effect=lambda: next(key_iter)),
-                patch('builtins.input', return_value=save_answer),
-                patch('sys.stdout', new=StringIO()),
-            ]
-
-            if week_today:
-                fixed = datetime.date.fromisoformat(week_today)
-                mock_dt = MagicMock()
-                mock_dt.date.today.return_value = fixed
-                mock_dt.timedelta = datetime.timedelta
-                mock_dt.datetime = datetime.datetime
-                patches.append(patch('tools.journal_tools.planner.datetime', mock_dt))
-
-            with contextlib.ExitStack() as stack:
-                for p in patches:
-                    stack.enter_context(p)
-                PlannerTool.run(args, directory=tmpdir)
-
-            expected_dir = os.path.join(fixture_dir, 'expected')
-            for fname in sorted(os.listdir(expected_dir)):
-                with open(os.path.join(expected_dir, fname)) as f:
-                    expected = f.read()
-                with open(os.path.join(tmpdir, fname)) as f:
-                    actual = f.read()
-                self.assertEqual(actual, expected, f"Mismatch in {fname}")
-        finally:
-            shutil.rmtree(tmpdir)
-
-    def test_sort_on_save(self):
-        self._run_fixture('sort_on_save')
-
-    def test_week_move_and_sort(self):
-        self._run_fixture('week_move_and_sort')
-
-    def test_week_cross_week_move(self):
-        self._run_fixture('week_cross_week_move')
-
-    def test_week_subtask_status(self):
-        self._run_fixture('week_subtask_status')
-
-    def test_week_carry_forward(self):
-        self._run_fixture('week_carry_forward')
-
-    def test_week_carry_and_move(self):
-        self._run_fixture('week_carry_and_move')
-
-    def test_week_carry_then_cross_week_move(self):
-        # Carry subtasks from Saturday to Sunday, then move the new task to Monday next week.
-        # The bug: the carried-over task was written to Sunday because new_tasks wasn't
-        # migrated when shift_task crossed the week boundary.
-        fixture_name = 'week_carry_then_cross_week_move'
-        fixture_dir = os.path.join(FIXTURES_DIR, fixture_name)
-        with open(os.path.join(fixture_dir, 'scenario.json')) as f:
-            config = json.load(f)
-
-        key_iter = iter(config['keys'])
-        fixed = datetime.date.fromisoformat(config['week_today'])
-        mock_dt = MagicMock()
-        mock_dt.date.today.return_value = fixed
-        mock_dt.timedelta = datetime.timedelta
-        mock_dt.datetime = datetime.datetime
-
-        tmpdir = tempfile.mkdtemp()
-        try:
-            for fname in os.listdir(JOURNAL_DIR):
-                shutil.copy(os.path.join(JOURNAL_DIR, fname), os.path.join(tmpdir, fname))
-
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=lambda: next(key_iter)))
-                stack.enter_context(patch('builtins.input', return_value='y'))
-                stack.enter_context(patch('sys.stdout', new=StringIO()))
-                stack.enter_context(patch('tools.journal_tools.planner.datetime', mock_dt))
-                PlannerTool.run([], directory=tmpdir)
-
-            expected_dir = os.path.join(fixture_dir, 'expected')
-            for fname in sorted(os.listdir(expected_dir)):
-                with open(os.path.join(expected_dir, fname)) as f:
-                    expected = f.read()
-                with open(os.path.join(tmpdir, fname)) as f:
-                    actual = f.read()
-                self.assertEqual(actual, expected, f"Mismatch in {fname}")
-
-            self.assertFalse(
-                os.path.exists(os.path.join(tmpdir, '2024-01-28.md')),
-                "Carry-over task must not be written to Sunday when moved to Monday",
-            )
-        finally:
-            shutil.rmtree(tmpdir)
-
-
-class TestInteractivePlanSubtasks(unittest.TestCase):
+class TestHasChanges(unittest.TestCase):
     CONTENT = (
         "# Journal\n"
         "\n"
@@ -342,245 +105,20 @@ class TestInteractivePlanSubtasks(unittest.TestCase):
         self.tmp.write(self.CONTENT)
         self.tmp.close()
         self.path = self.tmp.name
-        self.directory = os.path.dirname(self.path)
+        from parser.task_parser import TaskParser
         self.tasks = TaskParser.parse_file(self.path)
 
     def tearDown(self):
         if os.path.exists(self.path):
             os.unlink(self.path)
 
-    def _run(self, keys, inputs=None):
-        captured = {}
-
-        def capture_save(file_path, directory, timed, untimed, orig, new):
-            captured['timed']   = list(timed)
-            captured['untimed'] = list(untimed)
-            captured['new']     = list(new)
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=keys):
-            with patch('tools.journal_tools.planner._render'):
-                with patch('builtins.input', side_effect=inputs or []):
-                    with patch('tools.journal_tools.planner._save', side_effect=capture_save):
-                        PlannerTool.interactive_plan(self.directory, self.path, self.tasks)
-
-        return captured
-
-    def test_j_navigates_into_subtask(self):
-        # j moves to subtask; d changes its status; save captures the parent with updated child
-        result = self._run(['j', 'd', 'q'], inputs=['y'])
-        parent = result['untimed'][0]
-        self.assertEqual(parent.children[0].status, 'done')
-
-    def test_k_navigates_out_of_subtask(self):
-        # j then k returns to parent; status change applies to parent, not subtask
-        result = self._run(['j', 'k', 'd', 'q'], inputs=['y'])
-        parent = result['untimed'][0]
-        self.assertEqual(parent.status, 'done')
-        self.assertEqual(parent.children[0].status, 'todo')
-
-    def test_h_on_subtask_is_noop(self):
-        # j enters subtask; h should be a no-op (no time assigned, no change recorded)
-        result = self._run(['j', 'h', 'q'])
-        self.assertEqual(result, {})
-
-    def test_l_on_subtask_is_noop(self):
-        result = self._run(['j', 'l', 'q'])
-        self.assertEqual(result, {})
-
-    def test_subtask_status_change_detected_as_has_changes(self):
-        # Verify _has_changes picks up a subtask status mutation
+    def test_subtask_status_change_detected(self):
         parent = self.tasks[0]
         child  = self.tasks[1]
         original_lines = {t.line_number: t.to_line() for t in self.tasks}
         self.assertFalse(planner_has_changes([parent], [], original_lines, []))
         child.status = 'done'
         self.assertTrue(planner_has_changes([parent], [], original_lines, []))
-
-
-class TestInteractiveWeekNavigation(unittest.TestCase):
-    MONDAY = datetime.date(2024, 1, 15)  # a known Monday
-
-    def _make_state(self, tasks_by_col=None):
-        week_days = [self.MONDAY + datetime.timedelta(days=i) for i in range(7)]
-        week_tasks = tasks_by_col if tasks_by_col is not None else [[] for _ in range(7)]
-        # Build a minimal cache so cross-week moves can load adjacent days
-        cache = {}
-        for i, day in enumerate(week_days):
-            cache[day.isoformat()] = MagicMock(
-                file_path=None, all_tasks=[], task_list=week_tasks[i],
-                original_task_list=list(week_tasks[i]), original_lines={},
-                moved_subtasks=[],
-            )
-        return WeekState(week_days=week_days, directory='/tmp', cache=cache)
-
-    def _run(self, keys, start_col=None, tasks_by_col=None, start_row=0):
-        state = self._make_state(tasks_by_col=tasks_by_col)
-        with patch('tools.journal_tools.planner._read_key', side_effect=keys):
-            with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner._ensure_day_loaded'):
-                    with patch('sys.stdout'):
-                        return PlannerTool.interactive_week(state, start_col=start_col, start_row=start_row)
-
-    def test_quit_returns_zero(self):
-        self.assertEqual(self._run(['q']), (0, 0))
-
-    def test_h_on_monday_returns_minus_one(self):
-        direction, _ = self._run(['h'], start_col=0)
-        self.assertEqual(direction, -1)
-
-    def test_l_on_sunday_returns_one(self):
-        direction, _ = self._run(['l'], start_col=6)
-        self.assertEqual(direction, 1)
-
-    def test_h_not_on_monday_moves_left_stays_in_week(self):
-        direction, _ = self._run(['h', 'q'], start_col=2)
-        self.assertEqual(direction, 0)
-
-    def test_l_not_on_sunday_moves_right_stays_in_week(self):
-        direction, _ = self._run(['l', 'q'], start_col=4)
-        self.assertEqual(direction, 0)
-
-    def test_h_on_monday_no_longer_prompts(self):
-        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
-        tasks_by_col = [[task]] + [[] for _ in range(6)]
-        # 'd' marks status, then 'h' on Monday navigates without prompting
-        direction, _ = self._run(['d', 'h'], start_col=0, tasks_by_col=tasks_by_col)
-        self.assertEqual(direction, -1)
-
-    def test_l_on_sunday_no_longer_prompts(self):
-        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
-        tasks_by_col = [[] for _ in range(6)] + [[task]]
-        direction, _ = self._run(['d', 'l'], start_col=6, tasks_by_col=tasks_by_col)
-        self.assertEqual(direction, 1)
-
-    def test_default_cursor_lands_on_first_day_with_tasks(self):
-        task = Task(title='Task', status='todo', time=None, line_number=1, indent='')
-        tasks_by_col = [[], [], [task]] + [[] for _ in range(4)]
-        # cursor should start at col 2; pressing h twice lands on col 0; one more h switches week
-        direction, _ = self._run(['h', 'h', 'h'], tasks_by_col=tasks_by_col)
-        self.assertEqual(direction, -1)
-
-    def test_H_at_monday_moves_task_to_prev_week(self):
-        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
-        tasks_by_col = [[task]] + [[] for _ in range(6)]
-        state = self._make_state(tasks_by_col=tasks_by_col)
-        prev_day = self.MONDAY - datetime.timedelta(days=1)
-        prev_cache = MagicMock(file_path=None, task_list=[])
-        state.cache[prev_day.isoformat()] = prev_cache
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=['H', 'q']):
-            with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner.weekly.ensure_day_loaded',
-                           side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), prev_cache)):
-                    with patch('sys.stdout'):
-                        direction, row = PlannerTool.interactive_week(state, start_col=0)
-
-        self.assertEqual(direction, -1)
-        self.assertEqual(state.day(0).task_list, [])   # task removed from Monday
-        self.assertEqual(prev_cache.task_list, [task])  # task in prev Sunday
-        self.assertEqual(row, 0)                    # cursor at first (only) row
-
-    def test_L_at_sunday_moves_task_to_next_week(self):
-        task = Task(title='Standup', status='todo', time=None, line_number=1, indent='')
-        tasks_by_col = [[] for _ in range(6)] + [[task]]
-        state = self._make_state(tasks_by_col=tasks_by_col)
-        next_day = self.MONDAY + datetime.timedelta(days=7)
-        next_cache = MagicMock(file_path=None, task_list=[])
-        state.cache[next_day.isoformat()] = next_cache
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=['L', 'q']):
-            with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner.weekly.ensure_day_loaded',
-                           side_effect=lambda c, d, dr: c.__setitem__(d.isoformat(), next_cache)):
-                    with patch('sys.stdout'):
-                        direction, row = PlannerTool.interactive_week(state, start_col=6)
-
-        self.assertEqual(direction, 1)
-        self.assertEqual(state.day(6).task_list, [])   # task removed from Sunday
-        self.assertEqual(next_cache.task_list, [task])  # task in next Monday
-        self.assertEqual(row, 0)
-
-    def test_j_enters_subtask_and_d_marks_it_done(self):
-        child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
-        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        child.parent = parent
-        tasks_by_col = [[parent]] + [[] for _ in range(6)]
-        self._run(['j', 'd', 'q'], start_col=0, tasks_by_col=tasks_by_col)
-        self.assertEqual(child.status, 'done')
-        self.assertEqual(parent.status, 'todo')
-
-    def test_H_on_subtask_moves_root_parent(self):
-        child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
-        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        child.parent = parent
-        tasks_by_col = [[] for _ in range(7)]
-        tasks_by_col[1] = [parent]
-        # cursor starts at row 1 (subtask); H should move the root parent
-        self._run(['H', 'q'], start_col=1, tasks_by_col=tasks_by_col, start_row=1)
-        self.assertEqual(tasks_by_col[0], [parent])
-        self.assertEqual(tasks_by_col[1], [])
-
-    def test_carry_forward_removes_unfinished_subtasks_from_parent(self):
-        child_done = Task(title='Sub done', status='done', time=None, line_number=2, indent='  ')
-        child_todo = Task(title='Sub todo', status='todo', time=None, line_number=3, indent='  ')
-        parent = Task(title='My task', status='todo', time=None, line_number=1, indent='',
-                      children=[child_done, child_todo])
-        child_done.parent = parent
-        child_todo.parent = parent
-        tasks_by_col = [[parent]] + [[] for _ in range(6)]
-        state = self._make_state(tasks_by_col=tasks_by_col)
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=['>', 'q']):
-            with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner._ensure_day_loaded'):
-                    PlannerTool.interactive_week(state, start_col=0)
-
-        self.assertEqual(parent.children, [child_done])
-
-    def test_carry_forward_adds_new_task_to_tomorrow(self):
-        child_done = Task(title='Sub done', status='done', time=None, line_number=2, indent='  ')
-        child_todo = Task(title='Sub todo', status='todo', time=None, line_number=3, indent='  ')
-        parent = Task(title='My task', status='todo', time=None, line_number=1, indent='',
-                      children=[child_done, child_todo])
-        child_done.parent = parent
-        child_todo.parent = parent
-        tasks_by_col = [[parent]] + [[] for _ in range(6)]
-        state = self._make_state(tasks_by_col=tasks_by_col)
-
-        tuesday_key = (self.MONDAY + datetime.timedelta(days=1)).isoformat()
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=['>', 'q']):
-            with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner._ensure_day_loaded'):
-                    PlannerTool.interactive_week(state, start_col=0)
-
-        tuesday_tasks = state.cache[tuesday_key].task_list
-        self.assertEqual(len(tuesday_tasks), 1)
-        new_task = tuesday_tasks[0]
-        self.assertEqual(new_task.title, 'My task')
-        self.assertEqual(new_task.line_number, -1)
-        self.assertEqual(len(new_task.children), 1)
-        self.assertIs(new_task.children[0], child_todo)
-
-    def test_carry_forward_noop_when_all_subtasks_done(self):
-        child_done = Task(title='Sub done', status='done', time=None, line_number=2, indent='  ')
-        parent = Task(title='My task', status='todo', time=None, line_number=1, indent='',
-                      children=[child_done])
-        child_done.parent = parent
-        tasks_by_col = [[parent]] + [[] for _ in range(6)]
-        state = self._make_state(tasks_by_col=tasks_by_col)
-
-        tuesday_key = (self.MONDAY + datetime.timedelta(days=1)).isoformat()
-
-        with patch('tools.journal_tools.planner._read_key', side_effect=['>', 'q']):
-            with patch('tools.journal_tools.planner._render_week'):
-                with patch('tools.journal_tools.planner._ensure_day_loaded'):
-                    PlannerTool.interactive_week(state, start_col=0)
-
-        self.assertEqual(parent.children, [child_done])
-        self.assertEqual(state.cache[tuesday_key].task_list, [])
 
 
 class TestWeekCacheChanges(unittest.TestCase):
@@ -654,121 +192,375 @@ class TestTaskToLines(unittest.TestCase):
                          ['- [ ] Root\n', '  - [ ] Mid\n', '    - [ ] Leaf\n'])
 
 
-class TestInteractiveWeekEnterKey(unittest.TestCase):
-    MONDAY = datetime.date(2024, 1, 15)
+@pytest.mark.integration
+class PlannerIntegrationTest(unittest.TestCase):
 
-    def _make_state(self, file_path='/tmp/planner_test.md'):
-        week_days = [self.MONDAY + datetime.timedelta(days=i) for i in range(7)]
-        cache = {}
-        for i, day in enumerate(week_days):
-            cache[day.isoformat()] = DayCache(
-                file_path=file_path if i == 0 else None,
-                all_tasks=[],
-                task_list=[],
-                original_task_list=[],
-                original_lines={},
-            )
-        return WeekState(week_days=week_days, directory='/tmp', cache=cache)
+    def _run_fixture(self, fixture_name):
+        fixture_dir = os.path.join(FIXTURES_DIR, fixture_name)
+        with open(os.path.join(fixture_dir, 'scenario.json')) as f:
+            config = json.load(f)
 
-    def test_enter_on_task_row_is_noop(self):
-        task = Task(title='Task', status='todo', time=None, line_number=1, indent='')
-        state = self._make_state()
-        state.day(0).task_list = [task]
-        state.day(0).original_task_list = [task]
+        args      = config['args']
+        keys      = config['keys']
+        do_save   = config.get('save', False)
+        week_today = config.get('week_today')
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            for fname in os.listdir(JOURNAL_DIR):
+                shutil.copy(os.path.join(JOURNAL_DIR, fname), os.path.join(tmpdir, fname))
+
+            asyncio.run(self._drive_app(args, keys, do_save, week_today, tmpdir))
+
+            expected_dir = os.path.join(fixture_dir, 'expected')
+            for fname in sorted(os.listdir(expected_dir)):
+                with open(os.path.join(expected_dir, fname)) as f:
+                    expected = f.read()
+                with open(os.path.join(tmpdir, fname)) as f:
+                    actual = f.read()
+                self.assertEqual(actual, expected, f"Mismatch in {fname}")
+        finally:
+            shutil.rmtree(tmpdir)
+
+    async def _drive_app(self, args, keys, do_save, week_today, tmpdir):
+        file_path = None
+        date = None
+        if args:
+            input_arg = args[0]
+            basename = os.path.basename(input_arg)
+            date = resolve_date(basename) or FileFinder.get_journal_file_date(input_arg)
+            if date:
+                journal_files = FileFinder.find_journal_files(tmpdir, date_from=date, date_to=date)
+                if journal_files:
+                    file_path = journal_files[0]
+
+        patches = []
+        if week_today:
+            fixed = datetime.date.fromisoformat(week_today)
+            mock_dt = MagicMock()
+            mock_dt.date.today.return_value = fixed
+            mock_dt.timedelta = datetime.timedelta
+            mock_dt.date.fromisoformat = datetime.date.fromisoformat
+            patches.append(patch('tools.journal_tools.planner.week_screen.datetime', mock_dt))
+
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['\r', 'q']))
-            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
-            mock_plan = stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
-            stack.enter_context(patch('sys.stdout'))
-            PlannerTool.interactive_week(state, start_col=0, start_row=0)
-        mock_plan.assert_not_called()
+            for p in patches:
+                stack.enter_context(p)
 
-    def test_enter_on_header_opens_day_planner(self):
-        state = self._make_state(file_path='/tmp/planner_test.md')
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
-            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
-            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=False))
-            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache'))
-            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
-            mock_parser.parse_file.return_value = []
-            mock_plan = stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
-            stack.enter_context(patch('sys.stdout'))
-            PlannerTool.interactive_week(state, start_col=0)
-        mock_plan.assert_called_once()
-        self.assertEqual(mock_plan.call_args[0][1], '/tmp/planner_test.md')
+            app = PlannerApp(tmpdir, file_path=file_path, date=date)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                for key in keys:
+                    await pilot.press(key)
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes' if do_save else '#no')
 
-    def test_enter_with_changes_save_yes_calls_save_cache(self):
-        state = self._make_state()
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
-            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
-            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=True))
-            mock_save = stack.enter_context(patch('tools.journal_tools.planner._save_cache'))
-            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache'))
-            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
-            mock_parser.parse_file.return_value = []
-            stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
-            stack.enter_context(patch('builtins.input', return_value='y'))
-            stack.enter_context(patch('sys.stdout'))
-            PlannerTool.interactive_week(state, start_col=0)
-        mock_save.assert_called_once()
+    def test_sort_on_save(self):
+        self._run_fixture('sort_on_save')
 
-    def test_enter_with_changes_save_no_skips_save_cache(self):
-        state = self._make_state()
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
-            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
-            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=True))
-            mock_save = stack.enter_context(patch('tools.journal_tools.planner._save_cache'))
-            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache'))
-            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
-            mock_parser.parse_file.return_value = []
-            stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
-            stack.enter_context(patch('builtins.input', return_value='n'))
-            stack.enter_context(patch('sys.stdout'))
-            PlannerTool.interactive_week(state, start_col=0)
-        mock_save.assert_not_called()
+    def test_week_move_and_sort(self):
+        self._run_fixture('week_move_and_sort')
 
-    def test_enter_reloads_day_before_and_after_plan(self):
-        state = self._make_state(file_path='/tmp/planner_test.md')
-        reload_days = []
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(patch('tools.journal_tools.planner._read_key', side_effect=['k', '\r', 'q']))
-            stack.enter_context(patch('tools.journal_tools.planner._render_week'))
-            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=False))
-            stack.enter_context(patch('tools.journal_tools.planner._reload_day_in_cache',
-                                      side_effect=lambda c, d, dr: reload_days.append(d)))
-            mock_parser = stack.enter_context(patch('tools.journal_tools.planner.TaskParser'))
-            mock_parser.parse_file.return_value = []
-            stack.enter_context(patch.object(PlannerTool, 'interactive_plan'))
-            stack.enter_context(patch('sys.stdout'))
-            PlannerTool.interactive_week(state, start_col=0)
-        self.assertEqual(len(reload_days), 2)
-        self.assertEqual(reload_days[0], reload_days[1])
+    def test_week_cross_week_move(self):
+        self._run_fixture('week_cross_week_move')
+
+    def test_week_subtask_status(self):
+        self._run_fixture('week_subtask_status')
+
+    def test_week_carry_forward(self):
+        self._run_fixture('week_carry_forward')
+
+    def test_week_carry_and_move(self):
+        self._run_fixture('week_carry_and_move')
+
+    def test_week_carry_then_cross_week_move(self):
+        self._run_fixture('week_carry_then_cross_week_move')
 
 
-class TestRunWeekSaveOnExit(unittest.TestCase):
-    def _run(self, has_changes, save_answer='n'):
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(patch.object(PlannerTool, 'interactive_week', return_value=(0, 0)))
-            stack.enter_context(patch('tools.journal_tools.planner._ensure_day_loaded'))
-            stack.enter_context(patch('tools.journal_tools.planner._cache_has_changes', return_value=has_changes))
-            mock_save = stack.enter_context(patch('tools.journal_tools.planner._save_cache'))
-            mock_input = stack.enter_context(patch('builtins.input', return_value=save_answer))
-            stack.enter_context(patch('sys.stdout'))
-            PlannerTool.run_week('/tmp')
-        return mock_save, mock_input
+class TestDayGridInteraction(unittest.TestCase):
+    """Pilot-driven tests for DayScreen time-manipulation and quit logic."""
 
-    def test_no_changes_does_not_prompt_or_save(self):
-        mock_save, mock_input = self._run(has_changes=False)
-        mock_input.assert_not_called()
-        mock_save.assert_not_called()
+    STEP_M = 15
 
-    def test_changes_save_yes_calls_save_cache(self):
-        mock_save, _ = self._run(has_changes=True, save_answer='y')
-        mock_save.assert_called_once()
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False, encoding='utf-8'
+        )
+        self.tmp.write("- [ ] 9:00-10:00 Meeting\n- [ ] Buy milk\n")
+        self.tmp.close()
+        self.path = self.tmp.name
+        self.directory = os.path.dirname(self.path)
 
-    def test_changes_save_no_skips_save_cache(self):
-        mock_save, _ = self._run(has_changes=True, save_answer='n')
-        mock_save.assert_not_called()
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+        backup_dir = os.path.join(self.directory, '.backups')
+        if os.path.exists(backup_dir):
+            for f in os.listdir(backup_dir):
+                os.unlink(os.path.join(backup_dir, f))
+            os.rmdir(backup_dir)
+
+    async def _inspect(self, keys):
+        """Press keys and return (timed_tasks, untimed_tasks) from the grid."""
+        app = PlannerApp(self.directory, file_path=self.path)
+        async with app.run_test() as pilot:
+            for key in keys:
+                await pilot.press(key)
+            grid = app.screen.query_one(DayGrid)
+            return list(grid._timed_tasks), list(grid._untimed_tasks)
+
+    async def _drive_quit(self, keys, dialog_response=None):
+        app = PlannerApp(self.directory, file_path=self.path)
+        async with app.run_test() as pilot:
+            for key in keys:
+                await pilot.press(key)
+            if dialog_response and isinstance(app.screen, SaveDialog):
+                await pilot.click(dialog_response)
+
+    # ── Time shifting ─────────────────────────────────────────────────────────
+
+    def test_shift_right(self):
+        timed, _ = asyncio.run(self._inspect(['l']))
+        self.assertEqual(timed[0].time.start, minutes_to_time(540 + self.STEP_M))
+        self.assertEqual(timed[0].time.end,   minutes_to_time(600 + self.STEP_M))
+
+    def test_shift_left(self):
+        timed, _ = asyncio.run(self._inspect(['h']))
+        self.assertEqual(timed[0].time.start, minutes_to_time(540 - self.STEP_M))
+        self.assertEqual(timed[0].time.end,   minutes_to_time(600 - self.STEP_M))
+
+    def test_shift_clamps_at_zero(self):
+        presses = 540 // self.STEP_M + 5
+        timed, _ = asyncio.run(self._inspect(['h'] * presses))
+        self.assertEqual(timed[0].time.start, '0:00')
+        self.assertEqual(timed[0].time.end,   minutes_to_time(60))
+
+    def test_extend_end_time(self):
+        timed, _ = asyncio.run(self._inspect(['L']))
+        self.assertEqual(timed[0].time.start, '9:00')
+        self.assertEqual(timed[0].time.end,   minutes_to_time(600 + self.STEP_M))
+
+    def test_shrink_end_time(self):
+        timed, _ = asyncio.run(self._inspect(['H']))
+        self.assertEqual(timed[0].time.start, '9:00')
+        self.assertEqual(timed[0].time.end,   minutes_to_time(600 - self.STEP_M))
+
+    def test_shrink_fuses_at_minimum_duration(self):
+        # Meeting is 9:00-10:00 = 60 min; 4 presses shrink end to == start → fuse
+        presses = 60 // self.STEP_M
+        timed, _ = asyncio.run(self._inspect(['H'] * presses))
+        self.assertEqual(timed[0].time.start, '9:00')
+        self.assertIsNone(timed[0].time.end)
+
+    def test_extend_creates_end_time_for_start_only_task(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] 9:00 Standup\n")
+        timed, _ = asyncio.run(self._inspect(['L']))
+        self.assertEqual(timed[0].time.start, '9:00')
+        self.assertEqual(timed[0].time.end,   minutes_to_time(540 + self.STEP_M))
+
+    def test_untimed_task_moves_to_noon(self):
+        # j to Buy milk (untimed), l schedules it at noon
+        timed, untimed = asyncio.run(self._inspect(['j', 'l']))
+        timed_titles = [t.title for t in timed]
+        self.assertIn('Buy milk', timed_titles)
+        milk = next(t for t in timed if t.title == 'Buy milk')
+        self.assertEqual(milk.time.start, '12:00')
+        self.assertIsNone(milk.time.end)
+
+    def test_extend_creates_end_time_for_untimed_task(self):
+        # j to Buy milk, l schedules at noon, L adds end time
+        timed, _ = asyncio.run(self._inspect(['j', 'l', 'L']))
+        milk = next(t for t in timed if t.title == 'Buy milk')
+        self.assertEqual(milk.time.start, '12:00')
+        self.assertEqual(milk.time.end, minutes_to_time(720 + self.STEP_M))
+
+    # ── Remove time ───────────────────────────────────────────────────────────
+
+    def test_remove_time_moves_task_to_untimed(self):
+        timed, untimed = asyncio.run(self._inspect(['r']))
+        self.assertNotIn('Meeting', [t.title for t in timed])
+        self.assertIn('Meeting', [t.title for t in untimed])
+
+    def test_remove_time_on_untimed_is_noop(self):
+        timed_before, untimed_before = asyncio.run(self._inspect([]))
+        timed_after,  untimed_after  = asyncio.run(self._inspect(['j', 'r']))
+        self.assertEqual(len(timed_after),   len(timed_before))
+        self.assertEqual(len(untimed_after), len(untimed_before))
+
+    # ── Quit paths ────────────────────────────────────────────────────────────
+
+    def test_quit_no_changes_does_not_save(self):
+        with open(self.path) as f:
+            content_before = f.read()
+        asyncio.run(self._drive_quit(['q']))
+        with open(self.path) as f:
+            self.assertEqual(f.read(), content_before)
+
+    def test_quit_discard_does_not_save(self):
+        with open(self.path) as f:
+            content_before = f.read()
+        asyncio.run(self._drive_quit(['l', 'q'], dialog_response='#no'))
+        with open(self.path) as f:
+            self.assertEqual(f.read(), content_before)
+
+
+class TestWeekGridInteraction(unittest.TestCase):
+    """Pilot-driven tests for WeekScreen interaction logic."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        # Wednesday 2024-01-10: parent task with one subtask
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write("- [ ] My task\n  - [ ] Sub\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    async def _inspect(self, keys, week_today='2024-01-10'):
+        fixed = datetime.date.fromisoformat(week_today)
+        mock_dt = MagicMock()
+        mock_dt.date.today.return_value = fixed
+        mock_dt.timedelta = datetime.timedelta
+        mock_dt.date.fromisoformat = datetime.date.fromisoformat
+        with patch('tools.journal_tools.planner.week_screen.datetime', mock_dt):
+            app = PlannerApp(self.tmpdir)
+            async with app.run_test() as pilot:
+                await pilot.pause()  # let push_screen from on_mount settle
+                for key in keys:
+                    await pilot.press(key)
+                grid = app.screen.query_one(WeekGrid)
+                return grid._state, grid.cursor_col, grid.cursor_row
+
+    def test_H_on_subtask_moves_root_to_previous_day(self):
+        # 2024-01-10 is Wednesday (weekday=2); cursor starts at col=2, row=0
+        # j → row=1 (Sub), H → root (My task + Sub) moves to Tuesday (col=1)
+        state, col, row = asyncio.run(self._inspect(['j', 'H']))
+        self.assertEqual(col, 1)
+        self.assertEqual(len(state.day(1).task_list), 1)
+        self.assertEqual(state.day(1).task_list[0].title, 'My task')
+        self.assertEqual(len(state.day(1).task_list[0].children), 1)
+        self.assertEqual(len(state.day(2).task_list), 0)
+
+
+class TestTaskFormScreen(unittest.TestCase):
+    """Pilot-driven tests for TaskFormScreen create/edit/cancel behaviour."""
+
+    async def _run_form(self, task=None, interact=None):
+        """Open TaskFormScreen, run interact(pilot), return list of dismissed values."""
+        from textual.app import App as _App
+        dismissed = []
+
+        class _TestApp(_App):
+            async def on_mount(self):
+                await self.push_screen(
+                    TaskFormScreen(task),
+                    lambda r: dismissed.append(r),
+                )
+
+        async with _TestApp().run_test(size=(80, 40)) as pilot:
+            if interact:
+                await interact(pilot)
+        return dismissed
+
+    # ── Create mode ───────────────────────────────────────────────────────────
+
+    def test_save_with_title_returns_result(self):
+        from textual.widgets import Input
+
+        async def interact(pilot):
+            pilot.app.screen.query_one("#title", Input).value = "Buy coffee"
+            await pilot.press("ctrl+s")
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        self.assertEqual(len(dismissed), 1)
+        r = dismissed[0]
+        self.assertIsInstance(r, TaskFormResult)
+        self.assertEqual(r.title, "Buy coffee")
+        self.assertEqual(r.status, "todo")
+        self.assertIsNone(r.time_start)
+        self.assertIsNone(r.time_end)
+        self.assertIsNone(r.body)
+
+    def test_empty_title_does_not_dismiss(self):
+        async def interact(pilot):
+            await pilot.press("ctrl+s")
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        self.assertEqual(dismissed, [])
+
+    def test_save_captures_status_and_time(self):
+        from textual.widgets import Input, Select
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            screen.query_one("#title",      Input).value  = "Stand-up"
+            screen.query_one("#status",     Select).value = "in progress"
+            screen.query_one("#time_start", Input).value  = "9:00"
+            screen.query_one("#time_end",   Input).value  = "9:15"
+            await pilot.press("ctrl+s")
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        r = dismissed[0]
+        self.assertEqual(r.title,      "Stand-up")
+        self.assertEqual(r.status,     "in progress")
+        self.assertEqual(r.time_start, "9:00")
+        self.assertEqual(r.time_end,   "9:15")
+
+    def test_save_button_works(self):
+        from textual.widgets import Input
+
+        async def interact(pilot):
+            pilot.app.screen.query_one("#title", Input).value = "Task"
+            await pilot.click("#save")
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        self.assertEqual(dismissed[0].title, "Task")
+
+    # ── Cancel ────────────────────────────────────────────────────────────────
+
+    def test_escape_dismisses_with_none(self):
+        dismissed = asyncio.run(self._run_form(
+            interact=lambda pilot: pilot.press("escape")
+        ))
+        self.assertEqual(dismissed, [None])
+
+    def test_cancel_button_dismisses_with_none(self):
+        async def interact(pilot):
+            await pilot.click("#cancel")
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        self.assertEqual(dismissed, [None])
+
+    # ── Edit mode (pre-fill) ──────────────────────────────────────────────────
+
+    def test_edit_mode_prefills_title_and_status(self):
+        from textual.widgets import Input, Select
+        task = Task(title="Old task", status="done", time=None, line_number=1, indent="")
+        inspected = {}
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            inspected["title"]  = screen.query_one("#title",  Input).value
+            inspected["status"] = screen.query_one("#status", Select).value
+            await pilot.press("escape")
+
+        asyncio.run(self._run_form(task=task, interact=interact))
+        self.assertEqual(inspected["title"],  "Old task")
+        self.assertEqual(inspected["status"], "done")
+
+    def test_edit_mode_prefills_time_fields(self):
+        from textual.widgets import Input
+        task = Task(title="Meeting", status="todo",
+                    time=TaskTime(start="9:00", end="10:00"), line_number=1, indent="")
+        inspected = {}
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            inspected["time_start"] = screen.query_one("#time_start", Input).value
+            inspected["time_end"]   = screen.query_one("#time_end",   Input).value
+            await pilot.press("escape")
+
+        asyncio.run(self._run_form(task=task, interact=interact))
+        self.assertEqual(inspected["time_start"], "9:00")
+        self.assertEqual(inspected["time_end"],   "10:00")

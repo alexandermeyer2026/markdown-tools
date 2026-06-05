@@ -1,15 +1,9 @@
 import datetime
 import os
-import shutil
-import sys
 
-from models import Task, top_level_tasks
+from models import Task, top_level_tasks, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter
 from parser import TaskParser
-from tools.journal_tools.rendering import (
-    STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RESET,
-    get_minutes, ansi_truncate_pad,
-)
 from .state import DayCache, WeekState
 from .utils import flatten_tasks, task_to_lines, root_task, week_expanded
 
@@ -245,76 +239,6 @@ def save_cache(cache: dict, directory: str) -> None:
     # Reset the baseline so these changes aren't re-detected on the next save.
     for day in cache.values():
         day.original_task_list = list(day.task_list)
-
-
-def week_cell(task: Task | None, col_width: int, is_selected: bool) -> str:
-    prefix = '> ' if is_selected else '  '
-    if task is None:
-        text = prefix.ljust(col_width)
-        return f'\x1b[7m{text}{RESET}' if is_selected else text
-    icon = STATUS_ICONS.get(task.status, '?')
-    if task.parent is not None:
-        depth = 0
-        p = task.parent
-        while p is not None:
-            depth += 1
-            p = p.parent
-        title_max = max(col_width - 4 - depth, 1)
-        title_str = task.title[:title_max].ljust(title_max)
-        if is_selected:
-            return f'\x1b[7m> {" " * depth}{icon} {title_str}{RESET}'
-        return f'  {" " * depth}{GRAY}{icon} {title_str}{RESET}'
-    color     = STATUS_COLORS.get(task.status, GRAY)
-    title_max = col_width - 4  # 2 prefix + 1 icon + 1 space
-    title_str = task.title[:title_max].ljust(title_max)
-    if is_selected:
-        return f'\x1b[7m{prefix}{icon} {title_str}{RESET}'
-    return f'{prefix}{color}{icon}{RESET} {title_str}'
-
-
-def render_week(state: WeekState, cursor_col: int, cursor_row: int):
-    cols = shutil.get_terminal_size(fallback=(80, 24)).columns
-    col_width = max((cols - 2) // 7, 10)
-    margin = '  '
-    today = datetime.date.today()
-
-    lines = []
-    monday, sunday = state.week_days[0], state.week_days[-1]
-    lines.append(f"{margin}{BOLD}Week {monday.strftime('%b %d')} – {sunday.strftime('%b %d, %Y')}{RESET}\n")
-
-    header = margin
-    for i, day in enumerate(state.week_days):
-        label = f"{DAY_NAMES[i]} {day.strftime('%m/%d')}"
-        padded = label.ljust(col_width)
-        if cursor_row == -1 and i == cursor_col:
-            header += f"\x1b[7m{padded}{RESET}"
-        elif day == today:
-            header += f"{BOLD}{padded}{RESET}"
-        else:
-            header += padded
-    lines.append(header)
-    lines.append(margin + ('─' * (col_width - 1) + ' ') * 7)
-
-    expanded_per_col = [week_expanded(state.day(i).task_list) for i in range(7)]
-    max_rows = max(max((len(e) for e in expanded_per_col), default=0), 1)
-    for row in range(max_rows):
-        line = margin
-        for col_idx in range(7):
-            exp = expanded_per_col[col_idx]
-            is_sel = (col_idx == cursor_col and row == cursor_row)
-            if row < len(exp):
-                line += week_cell(exp[row], col_width, is_sel)
-            elif is_sel:
-                line += week_cell(None, col_width, True)
-            else:
-                line += ' ' * col_width
-        lines.append(line)
-
-    lines.append(f"\n{margin}{GRAY}[h/j/k/l] navigate  [H/L] move task  [>] carry subtasks  [t/i/d/f] status  [Enter] open day  [q] quit{RESET}")
-
-    padded_lines = [ansi_truncate_pad(line, cols) for line in '\n'.join(lines).split('\n')]
-    sys.stdout.write('\x1b[?25l\x1b[H' + '\n'.join(padded_lines) + '\x1b[J\x1b[?25h')
-    sys.stdout.flush()
 
 
 def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:

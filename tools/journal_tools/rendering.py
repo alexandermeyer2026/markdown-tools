@@ -3,8 +3,25 @@ import re
 
 from models import Task, get_minutes, minutes_to_time
 
-STATUS_ICONS = {'todo': '○', 'in progress': '◐', 'done': '✓', 'failed': '✗', 'started': '~'}
-STATUS_COLORS = {
+STATUS_ICONS: dict[str, str] = {
+    'todo':        '○',
+    'in progress': '◐',
+    'done':        '✓',
+    'failed':      '✗',
+    'started':     '~',
+}
+
+# Rich styles — used by the Textual planner screens
+STATUS_STYLES: dict[str, str] = {
+    'todo':        'bright_black',
+    'in progress': 'blue',
+    'done':        'green',
+    'failed':      'red',
+    'started':     'yellow',
+}
+
+# ANSI constants — used by non-Textual tools (catch_up, timeline, update)
+STATUS_COLORS: dict[str, str] = {
     'todo':        '\x1b[90m',
     'in progress': '\x1b[34m',
     'done':        '\x1b[32m',
@@ -24,6 +41,7 @@ def get_time_slot(minutes: int, step_size_hours: float) -> int:
 
 
 def scale_lines(step_size_hours: float, first_slot: int, now_slot: int | None) -> tuple[str, str]:
+    """Return (hours_line, scale_line) as plain Unicode strings (no ANSI)."""
     timeline_width = int(24 / step_size_hours)
     marker_time_step = 6 * step_size_hours
     markers = [h for h in range(24) if h % marker_time_step == 0]

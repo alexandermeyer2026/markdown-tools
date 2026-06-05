@@ -1,22 +1,4 @@
-import sys
-import termios
-import tty
-
-from models import Task
-from tools.journal_tools.rendering import get_minutes
-
-
-def read_key() -> str:
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if not ch:
-            raise EOFError("stdin closed")
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-    return ch
+from models import Task, get_minutes
 
 
 def flatten_tasks(tasks: list) -> list:
