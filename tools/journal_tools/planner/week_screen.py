@@ -331,19 +331,32 @@ class WeekGrid(Widget, can_focus=True):
         day_key = day.isoformat()
         ensure_day_loaded(self._cache, day, self._directory)
 
-        fp = self._cache[day_key].file_path
-        if fp is None:
-            import os
-            fp = os.path.join(self._directory, day.strftime("%Y-%m-%d.md"))
-            open(fp, "w").close()
-            reload_day_in_cache(self._cache, day, self._directory)
+        def push_day() -> None:
             fp = self._cache[day_key].file_path
+            if fp is None:
+                import os
+                fp = os.path.join(self._directory, day.strftime("%Y-%m-%d.md"))
+                open(fp, "w").close()
+                reload_day_in_cache(self._cache, day, self._directory)
+                fp = self._cache[day_key].file_path
 
-        def on_day_closed(_result: object) -> None:
-            reload_day_in_cache(self._cache, day, self._directory)
-            self.refresh()
+            def on_day_closed(_result: object) -> None:
+                reload_day_in_cache(self._cache, day, self._directory)
+                self.refresh()
 
-        self.app.push_screen(DayScreen(self._directory, fp, day), on_day_closed)
+            self.app.push_screen(DayScreen(self._directory, fp, day), on_day_closed)
+
+        if cache_has_changes(self._cache):
+            from .save_dialog import SaveDialog
+
+            def on_save(save_it: bool) -> None:
+                if save_it:
+                    save_cache(self._cache, self._directory)
+                push_day()
+
+            self.app.push_screen(SaveDialog(), on_save)
+        else:
+            push_day()
 
     def _edit_task(self, task: Task) -> None:
         from .task_form_screen import TaskFormScreen, TaskFormResult
@@ -400,9 +413,16 @@ class WeekGrid(Widget, can_focus=True):
         self.app.push_screen(TaskFormScreen(), on_form_result)
 
     def action_save(self) -> None:
-        if cache_has_changes(self._cache):
-            save_cache(self._cache, self._directory)
-            self.refresh()
+        if not cache_has_changes(self._cache):
+            return
+        from .save_dialog import SaveDialog
+
+        def on_confirm(save_it: bool) -> None:
+            if save_it:
+                save_cache(self._cache, self._directory)
+                self.refresh()
+
+        self.app.push_screen(SaveDialog(), on_confirm)
 
     def action_quit(self) -> None:
         if cache_has_changes(self._cache):

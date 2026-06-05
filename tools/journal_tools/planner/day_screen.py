@@ -402,14 +402,21 @@ class DayGrid(Widget, can_focus=True):
     # ── Save / quit ───────────────────────────────────────────────────────────
 
     def action_save(self) -> None:
-        if self._has_changes():
-            self._do_save()
-            self.refresh()
+        if not self._has_changes():
+            return
+        from .save_dialog import SaveDialog
+
+        def on_confirm(save_it: bool) -> None:
+            if save_it:
+                self._do_save()
+                self.refresh()
+
+        self.app.push_screen(SaveDialog(), on_confirm)
 
     def action_quit(self) -> None:
         def _close() -> None:
             if len(self.app.screen_stack) > 2:
-                self.app.pop_screen()
+                self.app.screen.dismiss(None)
             else:
                 self.app.exit()
 
