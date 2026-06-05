@@ -79,6 +79,58 @@ class TestSave(unittest.TestCase):
         planner_save(self.path, self.directory, [], [], {}, [])
         self.assertFalse(os.path.exists(self.path + '.tmp'))
 
+    def test_delete_root_task(self):
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        meeting = tasks[0]
+        buy = tasks[1]
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        planner_save(self.path, self.directory, [meeting], [], original_lines, [], [buy])
+        result = self._read()
+        self.assertIn('Meeting', result)
+        self.assertNotIn('Buy milk', result)
+
+    def test_delete_root_task_with_subtasks(self):
+        content = (
+            "- [ ] Buy milk\n"
+            "  - [ ] Bread\n"
+            "  - [ ] Eggs\n"
+            "- [ ] Call dentist\n"
+        )
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        buy, bread, eggs, dentist = tasks
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        planner_save(self.path, self.directory, [], [dentist], original_lines, [], [buy])
+        result = self._read()
+        self.assertNotIn('Buy milk', result)
+        self.assertNotIn('Bread', result)
+        self.assertNotIn('Eggs', result)
+        self.assertIn('Call dentist', result)
+
+    def test_delete_subtask(self):
+        content = (
+            "- [ ] Buy milk\n"
+            "  - [ ] Bread\n"
+            "  - [ ] Eggs\n"
+            "- [ ] Call dentist\n"
+        )
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        buy, bread, eggs, dentist = tasks
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        buy.children.remove(bread)
+        planner_save(self.path, self.directory, [], [buy], original_lines, [], [bread])
+        result = self._read()
+        self.assertIn('Buy milk', result)
+        self.assertNotIn('Bread', result)
+        self.assertIn('Eggs', result)
+        self.assertIn('Call dentist', result)
+
     def test_new_task_on_file_with_trailing_blank_has_single_gap(self):
         # File ending with a trailing blank line must not produce a double blank gap
         # before the new task. sort_timed_tasks only fixes this when >=2 timed tasks
@@ -119,6 +171,12 @@ class TestHasChanges(unittest.TestCase):
         self.assertFalse(planner_has_changes([parent], [], original_lines, []))
         child.status = 'done'
         self.assertTrue(planner_has_changes([parent], [], original_lines, []))
+
+    def test_deleted_task_detected(self):
+        parent = self.tasks[0]
+        original_lines = {t.line_number: t.to_line() for t in self.tasks}
+        self.assertFalse(planner_has_changes([parent], [], original_lines, []))
+        self.assertTrue(planner_has_changes([parent], [], original_lines, [], [parent]))
 
 
 class TestWeekCacheChanges(unittest.TestCase):
@@ -276,6 +334,24 @@ class PlannerIntegrationTest(unittest.TestCase):
     def test_week_carry_then_cross_week_move(self):
         self._run_fixture('week_carry_then_cross_week_move')
 
+    def test_week_delete_two_nonadjacent(self):
+        # Two deletions targeting lines 3 and 6 in the same save; verifies that
+        # both use their original line numbers simultaneously (not sequentially,
+        # which would shift line 6 to 5 after the first removal and hit the wrong task).
+        self._run_fixture('week_delete_two_nonadjacent')
+
+    def test_week_delete_body_text(self):
+        # Task with body text (non-task line between tasks); verifies the block-range
+        # algorithm includes the body line in the deletion even though it has no entry
+        # in original_lines.
+        self._run_fixture('week_delete_body_text')
+
+    def test_week_delete_task(self):
+        self._run_fixture('week_delete_task')
+
+    def test_week_delete_then_status_change(self):
+        self._run_fixture('week_delete_then_status_change')
+
 
 class TestDayGridInteraction(unittest.TestCase):
     """Pilot-driven tests for DayScreen time-manipulation and quit logic."""
@@ -404,6 +480,22 @@ class TestDayGridInteraction(unittest.TestCase):
         with open(self.path) as f:
             self.assertEqual(f.read(), content_before)
 
+    # ── Deletion ──────────────────────────────────────────────────────────────
+
+    def test_delete_untimed_task(self):
+        # j moves cursor to Buy milk (untimed), D deletes it
+        # (integration tests only cover timed deletion, so this fills the gap)
+        timed, untimed = asyncio.run(self._inspect(['j', 'D']))
+        self.assertEqual([t.title for t in timed], ['Meeting'])
+        self.assertEqual([t.title for t in untimed], [])
+
+    def test_delete_does_not_persist_without_save(self):
+        with open(self.path) as f:
+            content_before = f.read()
+        asyncio.run(self._drive_quit(['D', 'q'], dialog_response='#no'))
+        with open(self.path) as f:
+            self.assertEqual(f.read(), content_before)
+
 
 class TestWeekGridInteraction(unittest.TestCase):
     """Pilot-driven tests for WeekScreen interaction logic."""
@@ -441,6 +533,29 @@ class TestWeekGridInteraction(unittest.TestCase):
         self.assertEqual(state.day(1).task_list[0].title, 'My task')
         self.assertEqual(len(state.day(1).task_list[0].children), 1)
         self.assertEqual(len(state.day(2).task_list), 0)
+
+    # ── Deletion ──────────────────────────────────────────────────────────────
+
+    def test_D_deletes_root_task(self):
+        # cursor starts at col=2 (Wednesday), row=0 (My task); D removes it
+        state, col, row = asyncio.run(self._inspect(['D']))
+        self.assertEqual(len(state.day(2).task_list), 0)
+        self.assertEqual(row, -1)  # clamped to -1 when day is empty
+
+    def test_D_on_subtask_removes_only_subtask(self):
+        # j → row=1 (Sub), D removes Sub but leaves My task
+        state, col, row = asyncio.run(self._inspect(['j', 'D']))
+        self.assertEqual(col, 2)
+        self.assertEqual(row, 0)
+        self.assertEqual(len(state.day(2).task_list), 1)
+        self.assertEqual(state.day(2).task_list[0].title, 'My task')
+        self.assertEqual(state.day(2).task_list[0].children, [])
+
+    def test_D_then_status_change_on_remaining(self):
+        # j → Sub, D deletes Sub, cursor clamps to row=0 (My task), i → in progress
+        state, col, row = asyncio.run(self._inspect(['j', 'D', 'i']))
+        self.assertEqual(state.day(2).task_list[0].status, 'in progress')
+        self.assertEqual(state.day(2).task_list[0].children, [])
 
 
 class TestTaskFormScreen(unittest.TestCase):
