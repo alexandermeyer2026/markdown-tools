@@ -1,9 +1,18 @@
-import curses
 import os
 import re
 import shutil
 import sys
 from datetime import datetime as dt
+
+from rich.console import Group
+from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, HorizontalGroup
+from textual.reactive import reactive
+from textual.screen import ModalScreen
+from textual.widget import Widget
+from textual.widgets import Button, Label, Static
 
 from os_utils import FileFinder, resolve_date
 
@@ -47,7 +56,7 @@ class TimeMachineTool:
         backup_paths = [os.path.join(backup_dir, b) for b in backups]
         timestamps = [_extract_ts(b) for b in backups]
 
-        curses.wrapper(_browse, file_path, filename, backup_paths, timestamps, journal_dir)
+        TimeMachineApp(file_path, filename, backup_paths, timestamps, journal_dir).run()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -87,157 +96,285 @@ def _diff(current: list[str], selected: list[str]) -> list[str]:
     ))
 
 
-# ── TUI ───────────────────────────────────────────────────────────────────────
+# ── Textual TUI ───────────────────────────────────────────────────────────────
 
-def _browse(stdscr, file_path, filename, backup_paths, timestamps, journal_dir):
-    curses.curs_set(0)
-    curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_CYAN,  -1)                          # header
-    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_WHITE)          # selected row
-    curses.init_pair(3, curses.COLOR_GREEN, -1)                          # diff add / confirm
-    curses.init_pair(4, curses.COLOR_RED,   -1)                          # diff remove
-    curses.init_pair(5, curses.COLOR_YELLOW, -1)                         # diff hunk
-    curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)           # status bar
+class RestoreDialog(ModalScreen[bool]):
+    DEFAULT_CSS = """
+    RestoreDialog {
+        align: center middle;
+    }
+    RestoreDialog > HorizontalGroup {
+        background: $surface;
+        border: round $warning;
+        padding: 1 2;
+        width: auto;
+        height: auto;
+    }
+    RestoreDialog Label {
+        width: auto;
+        margin-right: 2;
+        content-align: left middle;
+    }
+    RestoreDialog Button {
+        margin-left: 1;
+    }
+    """
 
-    selected  = 0
-    scroll    = 0
-    diff_mode = False
-    focus     = 'left'   # 'left' | 'right'
-    LEFT_W    = max(22, len(f" Time Machine: {filename} "))
+    BINDINGS = [
+        Binding("y",      "confirm", show=False),
+        Binding("n",      "cancel",  show=False),
+        Binding("escape", "cancel",  show=False),
+    ]
 
-    current_lines = _read(file_path) if os.path.exists(file_path) else []
+    def __init__(self, ts_label: str) -> None:
+        super().__init__()
+        self._ts_label = ts_label
 
-    while True:
-        stdscr.erase()
-        h, w = stdscr.getmaxyx()
-        right_x = LEFT_W + 1
-        right_w = w - right_x
-        content_h = h - 3  # rows between header and status bar
+    def compose(self) -> ComposeResult:
+        with HorizontalGroup():
+            yield Label(f"Restore {self._ts_label}?")
+            yield Button("Yes", id="yes", variant="warning")
+            yield Button("No",  id="no",  variant="default")
 
-        # ── right panel: content or diff (computed early for header) ────────────
-        selected_lines = _read(backup_paths[selected])
-        if diff_mode:
-            display = _diff(current_lines, selected_lines)
-            panel_title = " diff vs current "
-        else:
-            display = [l.rstrip('\n') for l in selected_lines]
-            panel_title = f" {_fmt_ts(timestamps[selected])} "
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
 
-        # ── header ────────────────────────────────────────────────────────────
-        left_header  = f" Time Machine: {filename} ".ljust(LEFT_W)[:LEFT_W]
-        right_header = panel_title.ljust(right_w)[:right_w]
-        left_attr  = (curses.color_pair(1) | curses.A_BOLD) if focus == 'left'  else curses.color_pair(1)
-        right_attr = (curses.color_pair(1) | curses.A_BOLD) if focus == 'right' else curses.color_pair(1)
-        try:
-            stdscr.addstr(0, 0,       left_header,  left_attr)
-            stdscr.addstr(0, LEFT_W,  '│',           curses.color_pair(1))
-            stdscr.addstr(0, right_x, right_header,  right_attr)
-        except curses.error:
-            pass
+    def action_confirm(self) -> None:
+        self.dismiss(True)
 
-        # ── left panel: version list ──────────────────────────────────────────
-        for i, ts in enumerate(timestamps):
-            row = 1 + i
-            if row > content_h:
-                break
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class VersionList(Widget, can_focus=True):
+    DEFAULT_CSS = """
+    VersionList {
+        width: 24;
+        height: 1fr;
+    }
+    """
+
+    BINDINGS = [
+        Binding("j", "cursor_down", show=False),
+        Binding("k", "cursor_up",   show=False),
+        Binding("l", "focus_right", show=False),
+        Binding("d", "toggle_diff", show=False),
+        Binding("r", "restore",     show=False),
+    ]
+
+    selected: reactive[int] = reactive(0, repaint=True)
+
+    def __init__(self, timestamps: list[str]) -> None:
+        super().__init__()
+        self._timestamps = timestamps
+
+    def watch_selected(self, _value: int) -> None:
+        self.app.refresh_content()  # type: ignore[attr-defined]
+
+    def on_focus(self) -> None:
+        self.app._update_hints()  # type: ignore[attr-defined]
+
+    def render(self) -> Group:
+        w = max(self.size.width, 1)
+        lines: list[Text] = []
+        for i, ts in enumerate(self._timestamps):
             label = f" {_fmt_ts(ts)}"
-            attr  = curses.color_pair(2) if i == selected else 0
-            try:
-                stdscr.addstr(row, 0, label.ljust(LEFT_W)[:LEFT_W], attr)
-            except curses.error:
-                pass
+            t = Text(label.ljust(w)[:w])
+            if i == self.selected:
+                t.stylize("reverse")
+            lines.append(t)
+        return Group(*lines)
 
-        # ── divider ───────────────────────────────────────────────────────────
-        for row in range(1, h - 2):
-            try:
-                stdscr.addch(row, LEFT_W, '│')
-            except curses.error:
-                pass
+    def update_list(self, timestamps: list[str]) -> None:
+        self._timestamps = timestamps
+        self.selected = min(self.selected, len(timestamps) - 1)
+        self.refresh()
 
-        # ── right panel: content ─────────────────────────────────────────────
-        for i, line in enumerate(display[scroll: scroll + content_h]):
-            row = 1 + i
-            if diff_mode:
-                if   line.startswith('+') and not line.startswith('+++'):
-                    attr = curses.color_pair(3)
+    def action_cursor_down(self) -> None:
+        if self.selected < len(self._timestamps) - 1:
+            self.selected += 1
+
+    def action_cursor_up(self) -> None:
+        if self.selected > 0:
+            self.selected -= 1
+
+    def action_focus_right(self) -> None:
+        self.app.query_one(ContentView).focus()
+
+    def action_toggle_diff(self) -> None:
+        self.app.toggle_diff()  # type: ignore[attr-defined]
+
+    def action_restore(self) -> None:
+        self.app.restore()  # type: ignore[attr-defined]
+
+
+class ContentView(Widget, can_focus=True):
+    DEFAULT_CSS = """
+    ContentView {
+        width: 1fr;
+        height: 1fr;
+        border-left: solid $primary;
+    }
+    """
+
+    BINDINGS = [
+        Binding("j", "scroll_down", show=False),
+        Binding("k", "scroll_up",   show=False),
+        Binding("h", "focus_left",  show=False),
+        Binding("d", "toggle_diff", show=False),
+        Binding("r", "restore",     show=False),
+    ]
+
+    scroll_offset: reactive[int] = reactive(0, repaint=True)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._lines: list[str] = []
+        self._diff_mode: bool = False
+
+    def on_focus(self) -> None:
+        self.app._update_hints()  # type: ignore[attr-defined]
+
+    def set_lines(self, lines: list[str], diff_mode: bool) -> None:
+        self._lines = lines
+        self._diff_mode = diff_mode
+        self.scroll_offset = 0
+        self.refresh()
+
+    def render(self) -> Group:
+        h = max(self.size.height, 1)
+        w = max(self.size.width, 1)
+        visible = self._lines[self.scroll_offset: self.scroll_offset + h]
+        result: list[Text] = []
+        for line in visible:
+            if self._diff_mode:
+                if line.startswith('+') and not line.startswith('+++'):
+                    t = Text(line[:w], style="green")
                 elif line.startswith('-') and not line.startswith('---'):
-                    attr = curses.color_pair(4)
+                    t = Text(line[:w], style="red")
                 elif line.startswith('@'):
-                    attr = curses.color_pair(5)
+                    t = Text(line[:w], style="yellow")
                 else:
-                    attr = 0
+                    t = Text(line[:w])
             else:
-                attr = 0
-            try:
-                stdscr.addstr(row, right_x, line[:right_w - 1], attr)
-            except curses.error:
-                pass
+                t = Text(line[:w])
+            result.append(t)
+        return Group(*result)
 
-        # ── status bar ────────────────────────────────────────────────────────
-        d_hint = "[d] content" if diff_mode else "[d] diff"
-        if focus == 'left':
-            hints = f"[j/k] version  [l] →content  {d_hint}  [r] restore  [q] quit  ({selected + 1}/{len(timestamps)})"
+    def action_scroll_down(self) -> None:
+        max_scroll = max(0, len(self._lines) - self.size.height)
+        self.scroll_offset = min(self.scroll_offset + 1, max_scroll)
+
+    def action_scroll_up(self) -> None:
+        self.scroll_offset = max(0, self.scroll_offset - 1)
+
+    def action_focus_left(self) -> None:
+        self.app.query_one(VersionList).focus()
+
+    def action_toggle_diff(self) -> None:
+        self.app.toggle_diff()  # type: ignore[attr-defined]
+
+    def action_restore(self) -> None:
+        self.app.restore()  # type: ignore[attr-defined]
+
+
+class TimeMachineApp(App):
+    DEFAULT_CSS = """
+    TimeMachineApp {
+        layout: vertical;
+    }
+    #panels {
+        height: 1fr;
+    }
+    #hints {
+        height: 1;
+        background: $primary;
+        color: $background;
+        padding: 0 2;
+    }
+    """
+
+    BINDINGS = [
+        Binding("q",      "quit", show=False),
+        Binding("ctrl+c", "quit", show=False),
+    ]
+
+    def __init__(
+        self,
+        file_path: str,
+        filename: str,
+        backup_paths: list[str],
+        timestamps: list[str],
+        journal_dir: str,
+    ) -> None:
+        super().__init__()
+        self._file_path     = file_path
+        self._filename      = filename
+        self._backup_paths  = backup_paths
+        self._timestamps    = timestamps
+        self._journal_dir   = journal_dir
+        self._diff_mode     = False
+        self._current_lines = _read(file_path) if os.path.exists(file_path) else []
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="panels"):
+            yield VersionList(self._timestamps)
+            yield ContentView()
+        yield Static("", id="hints")
+
+    def on_mount(self) -> None:
+        self.title = f"Time Machine: {self._filename}"
+        self.query_one(VersionList).focus()
+        self.refresh_content()
+
+    def refresh_content(self) -> None:
+        version_list = self.query_one(VersionList)
+        content_view = self.query_one(ContentView)
+        idx = version_list.selected
+        selected_lines = _read(self._backup_paths[idx])
+        if self._diff_mode:
+            lines = _diff(self._current_lines, selected_lines)
         else:
+            lines = [line.rstrip('\n') for line in selected_lines]
+        content_view.set_lines(lines, self._diff_mode)
+        self._update_hints()
+
+    def _update_hints(self) -> None:
+        focused = self.focused
+        d_hint = "[d] content" if self._diff_mode else "[d] diff"
+        idx = self.query_one(VersionList).selected
+        n = len(self._timestamps)
+        if isinstance(focused, ContentView):
             hints = f"[h] →versions  [j/k] scroll  {d_hint}  [r] restore  [q] quit"
-        try:
-            stdscr.addstr(h - 2, 0, f"  {hints}".ljust(w)[:w], curses.color_pair(6))
-        except curses.error:
-            pass
+        else:
+            hints = f"[j/k] version  [l] →content  {d_hint}  [r] restore  [q] quit  ({idx + 1}/{n})"
+        self.query_one("#hints", Static).update(f"  {hints}")
 
-        stdscr.refresh()
+    def toggle_diff(self) -> None:
+        self._diff_mode = not self._diff_mode
+        self.refresh_content()
 
-        # ── input ─────────────────────────────────────────────────────────────
-        key = stdscr.getch()
+    def restore(self) -> None:
+        idx = self.query_one(VersionList).selected
+        ts_label = _fmt_ts(self._timestamps[idx])
 
-        if key in (ord('q'), ord('Q'), 27):
-            break
-        elif key == ord('l') and focus == 'left':
-            focus = 'right'
-        elif key == ord('h') and focus == 'right':
-            focus = 'left'
-        elif key == ord('k'):
-            if focus == 'left' and selected > 0:
-                selected -= 1
-                scroll = 0
-            elif focus == 'right':
-                scroll = max(0, scroll - 1)
-        elif key == ord('j'):
-            if focus == 'left' and selected < len(timestamps) - 1:
-                selected += 1
-                scroll = 0
-            elif focus == 'right':
-                scroll = min(scroll + 1, max(0, len(display) - content_h))
-        elif key in (ord('d'), ord('D')):
-            diff_mode = not diff_mode
-            scroll = 0
-        elif key in (ord('r'), ord('R')):
-            prompt = f" Restore {_fmt_ts(timestamps[selected])}? [y/N] "
-            try:
-                stdscr.addstr(h - 1, 0, prompt.ljust(w)[:w], curses.color_pair(5) | curses.A_BOLD)
-            except curses.error:
-                pass
-            stdscr.refresh()
-            confirm = stdscr.getch()
-            if confirm not in (ord('y'), ord('Y')):
-                continue
+        def on_confirmed(confirmed: bool) -> None:
+            if not confirmed:
+                return
             from os_utils.backup_manager import BackupManager
-            if os.path.exists(file_path):
-                BackupManager.backup(file_path, journal_dir)
-            shutil.copy2(backup_paths[selected], file_path)
-            current_lines = _read(file_path)
-            # re-scan so the newly created backup appears in the list
-            backup_dir = os.path.dirname(backup_paths[0])
+            if os.path.exists(self._file_path):
+                BackupManager.backup(self._file_path, self._journal_dir)
+            shutil.copy2(self._backup_paths[idx], self._file_path)
+            self._current_lines = _read(self._file_path)
+            backup_dir = os.path.dirname(self._backup_paths[0])
             new_backups = sorted(
-                [f for f in os.listdir(backup_dir) if f.endswith(f'_{filename}')],
+                [f for f in os.listdir(backup_dir) if f.endswith(f'_{self._filename}')],
                 reverse=True,
             )
-            backup_paths = [os.path.join(backup_dir, b) for b in new_backups]
-            timestamps   = [_extract_ts(b) for b in new_backups]
-            selected     = min(selected, len(timestamps) - 1)
-            msg = f" Restored {_fmt_ts(timestamps[selected])} — press any key "
-            try:
-                stdscr.addstr(h - 1, 0, msg.ljust(w)[:w], curses.color_pair(3) | curses.A_BOLD)
-            except curses.error:
-                pass
-            stdscr.refresh()
-            stdscr.getch()
+            self._backup_paths = [os.path.join(backup_dir, b) for b in new_backups]
+            self._timestamps   = [_extract_ts(b) for b in new_backups]
+            self.query_one(VersionList).update_list(self._timestamps)
+            self.refresh_content()
+            self.notify(f"Restored {ts_label}", severity="information")
+
+        self.push_screen(RestoreDialog(ts_label), on_confirmed)
