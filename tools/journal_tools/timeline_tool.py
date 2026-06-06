@@ -7,7 +7,7 @@ from os_utils import FileFinder, resolve_date
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, RESET,
-    get_minutes, get_time_slot, scale_lines, subtask_rows,
+    get_minutes, get_time_slot, scale_lines, body_rows, subtask_rows,
 )
 
 _STEP_SIZES = [0.25, 0.5, 1]
@@ -112,8 +112,10 @@ class TimelineTool:
         hours_line, scale_line = scale_lines(step, first_task_slot, now_marker_slot)
         lines = [hours_line, scale_line]
         for task in timed_tasks:
+            icon_col = TimelineTool._icon_col(task, step, first_task_slot)
             lines.append(TimelineTool.render_task(task, step, first_task_slot, now_marker_slot))
-            lines.extend(subtask_rows(task, left_pad=TimelineTool._icon_col(task, step, first_task_slot)))
+            lines.extend(body_rows(task, left_pad=icon_col))
+            lines.extend(subtask_rows(task, left_pad=icon_col))
 
         return lines
 

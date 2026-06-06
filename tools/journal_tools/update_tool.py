@@ -7,7 +7,7 @@ from os_utils import FileFinder
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
-    ansi_truncate_pad, get_minutes,
+    ansi_truncate_pad, body_rows, get_minutes,
 )
 from tools.journal_tools.timeline_tool import TimelineTool
 
@@ -175,9 +175,9 @@ class UpdateTool:
                 lines.append(pad(
                     f"  {RED}{icon}{RESET}  {GRAY}{date.strftime('%a %-d %b')}{RESET}  {task.title}"
                 ))
-                for child in task.children:
-                    cicon = STATUS_ICONS.get(child.status, '○')
-                    lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
+                for bline in body_rows(task, left_pad=2):
+                    lines.append(pad(bline))
+                lines.extend(UpdateTool._subtask_lines(task, pad))
         return lines
 
     @staticmethod
@@ -215,9 +215,9 @@ class UpdateTool:
             icon  = STATUS_ICONS.get(task.status, '○')
             color = STATUS_COLORS.get(task.status, GRAY)
             lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
-            for child in task.children:
-                cicon = STATUS_ICONS.get(child.status, '○')
-                lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
+            for bline in body_rows(task, left_pad=2):
+                lines.append(pad(bline))
+            lines.extend(UpdateTool._subtask_lines(task, pad))
 
         return lines
 
@@ -228,6 +228,8 @@ class UpdateTool:
             cicon  = STATUS_ICONS.get(child.status, '○')
             indent = '  ' * (depth + 2)
             lines.append(pad(f"{indent}{GRAY}{cicon} {child.title}{RESET}"))
+            for bline in body_rows(child, left_pad=0, depth=depth + 2):
+                lines.append(pad(bline))
             lines.extend(UpdateTool._subtask_lines(child, pad, depth + 1))
         return lines
 
@@ -257,11 +259,15 @@ class UpdateTool:
                     color       = STATUS_COLORS.get(task.status, GRAY)
                     time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}"
                     lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
+                    for bline in body_rows(task, left_pad=2):
+                        lines.append(pad(bline))
                     lines.extend(UpdateTool._subtask_lines(task, pad))
             for task in untimed:
                 icon  = STATUS_ICONS.get(task.status, '○')
                 color = STATUS_COLORS.get(task.status, GRAY)
                 lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
+                for bline in body_rows(task, left_pad=2):
+                    lines.append(pad(bline))
                 lines.extend(UpdateTool._subtask_lines(task, pad))
         return lines
 
