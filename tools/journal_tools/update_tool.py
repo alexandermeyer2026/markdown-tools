@@ -131,24 +131,32 @@ class UpdateTool:
 
     @staticmethod
     def _header_and_calendar(today, now):
+        cols = UpdateTool._cols()
+
         day_name = today.strftime('%A')
         date_str = today.strftime('%-d %B %Y')
         week_num = today.isocalendar()[1]
-        header   = f"  {BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
+
+        header_vis = f"{day_name}, {date_str}  ·  Week {week_num}"
+        header_pad = ' ' * max(0, (cols - len(header_vis)) // 2)
+        header     = f"{header_pad}{BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
 
         clock_lines = UpdateTool._big_clock_lines(now)
         cal_lines   = UpdateTool._calendar_lines(today)
 
-        gap   = '   '
-        n     = len(cal_lines)
-        pad   = max(0, (n - 5) // 2)
-        empty = ' ' * UpdateTool._CLOCK_VISUAL_W
+        gap    = '   '
+        n      = len(cal_lines)
+        pad_r  = max(0, (n - 5) // 2)
+        empty  = ' ' * UpdateTool._CLOCK_VISUAL_W
 
-        clock_padded = [empty] * pad + clock_lines + [empty] * (n - pad - 5)
+        clock_padded = [empty] * pad_r + clock_lines + [empty] * (n - pad_r - 5)
+
+        block_w   = UpdateTool._CLOCK_VISUAL_W + len(gap) + 29  # clock + gap + calendar
+        block_pad = ' ' * max(0, (cols - block_w) // 2)
 
         result = [header]
         for c, cal in zip(clock_padded, cal_lines):
-            result.append(c + gap + cal)
+            result.append(block_pad + c + gap + cal)
         return result
 
     # ── Three-column layout ───────────────────────────────────────────────────
