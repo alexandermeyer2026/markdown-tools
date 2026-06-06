@@ -214,6 +214,16 @@ class UpdateTool:
         return lines
 
     @staticmethod
+    def _subtask_lines(task, pad, depth=1):
+        lines = []
+        for child in task.children:
+            cicon  = STATUS_ICONS.get(child.status, '○')
+            indent = '  ' * (depth + 2)
+            lines.append(pad(f"{indent}{GRAY}{cicon} {child.title}{RESET}"))
+            lines.extend(UpdateTool._subtask_lines(child, pad, depth + 1))
+        return lines
+
+    @staticmethod
     def _col_upcoming(today, upcoming_by_date, col_w):
         pad   = lambda s: ansi_truncate_pad(s, col_w)
         lines = [pad(UpdateTool._col_divider('Upcoming', col_w))]
@@ -234,10 +244,7 @@ class UpdateTool:
                 color       = STATUS_COLORS.get(task.status, GRAY)
                 time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
                 lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
-                if not task.time:
-                    for child in task.children:
-                        cicon = STATUS_ICONS.get(child.status, '○')
-                        lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
+                lines.extend(UpdateTool._subtask_lines(task, pad))
         return lines
 
     @staticmethod
