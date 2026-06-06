@@ -165,7 +165,8 @@ class TestVersionListNavigation(unittest.TestCase):
                 await pilot.press('j')
                 await pilot.press('j')
                 return self.app.query_one(VersionList).selected
-        self.assertEqual(asyncio.run(run()), 2)
+        # 3 backups + "Current" = 4 items (indices 0–3)
+        self.assertEqual(asyncio.run(run()), 3)
 
 
 class TestFocusSwitch(unittest.TestCase):
@@ -242,15 +243,26 @@ class TestRestore(unittest.TestCase):
         async def run():
             async with self.app.run_test() as pilot:
                 await pilot.pause()
+                await pilot.press('j')  # move off "Current" to first backup
                 await pilot.press('r')
                 await pilot.pause()
                 return isinstance(self.app.screen, RestoreDialog)
         self.assertTrue(asyncio.run(run()))
 
+    def test_r_on_current_does_not_open_dialog(self):
+        async def run():
+            async with self.app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('r')  # idx 0 = "Current"
+                await pilot.pause()
+                return isinstance(self.app.screen, RestoreDialog)
+        self.assertFalse(asyncio.run(run()))
+
     def test_confirm_restore_replaces_file_content(self):
         async def run():
             async with self.app.run_test() as pilot:
                 await pilot.pause()
+                await pilot.press('j')  # move off "Current" to first backup
                 await pilot.press('r')
                 await pilot.pause()
                 await pilot.click('#yes')
@@ -263,6 +275,7 @@ class TestRestore(unittest.TestCase):
         async def run():
             async with self.app.run_test() as pilot:
                 await pilot.pause()
+                await pilot.press('j')  # move off "Current" to first backup
                 await pilot.press('r')
                 await pilot.pause()
                 await pilot.click('#no')
@@ -275,6 +288,7 @@ class TestRestore(unittest.TestCase):
         async def run():
             async with self.app.run_test() as pilot:
                 await pilot.pause()
+                await pilot.press('j')  # move off "Current" to first backup
                 await pilot.press('r')
                 await pilot.pause()
                 await pilot.press('n')
@@ -287,6 +301,7 @@ class TestRestore(unittest.TestCase):
         async def run():
             async with self.app.run_test() as pilot:
                 await pilot.pause()
+                await pilot.press('j')  # move off "Current" to first backup
                 await pilot.press('r')
                 await pilot.pause()
                 await pilot.click('#yes')
@@ -299,6 +314,7 @@ class TestRestore(unittest.TestCase):
         async def run():
             async with self.app.run_test() as pilot:
                 await pilot.pause()
+                await pilot.press('j')  # move off "Current" to first backup
                 await pilot.press('r')
                 await pilot.pause()
                 await pilot.press('escape')

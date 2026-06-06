@@ -86,14 +86,17 @@ def _read(path: str) -> list[str]:
         return [f"(error: {e})\n"]
 
 
-def _diff(current: list[str], selected: list[str]) -> list[str]:
+def _diff(current: list[str], selected: list[str], fromfile: str = 'previous', tofile: str = 'this version') -> list[str]:
     import difflib
-    return list(difflib.unified_diff(
-        current, selected,
-        fromfile='current',
-        tofile='this version',
-        lineterm='',
-    ))
+    return [
+        line.rstrip('\n')
+        for line in difflib.unified_diff(
+            current, selected,
+            fromfile=fromfile,
+            tofile=tofile,
+            lineterm='',
+        )
+    ]
 
 
 # ── Textual TUI ───────────────────────────────────────────────────────────────
@@ -325,7 +328,7 @@ class TimeMachineApp(App):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="panels"):
-            yield VersionList(self._timestamps)
+            yield VersionList(["Current"] + self._timestamps)
             yield ContentView()
         yield Static("", id="hints")
 
@@ -338,11 +341,31 @@ class TimeMachineApp(App):
         version_list = self.query_one(VersionList)
         content_view = self.query_one(ContentView)
         idx = version_list.selected
-        selected_lines = _read(self._backup_paths[idx])
-        if self._diff_mode:
-            lines = _diff(self._current_lines, selected_lines)
+
+        if idx == 0:
+            selected_lines = self._current_lines
+            if self._diff_mode:
+                prev_lines = _read(self._backup_paths[0]) if self._backup_paths else []
+                fromfile = _fmt_ts(self._timestamps[0]) if self._timestamps else '(none)'
+                lines = _diff(prev_lines, selected_lines, fromfile=fromfile, tofile='current')
+            else:
+                lines = [line.rstrip('\n') for line in selected_lines]
         else:
-            lines = [line.rstrip('\n') for line in selected_lines]
+            backup_idx = idx - 1
+            selected_lines = _read(self._backup_paths[backup_idx])
+            if self._diff_mode:
+                if backup_idx + 1 < len(self._backup_paths):
+                    prev_lines = _read(self._backup_paths[backup_idx + 1])
+                    fromfile = _fmt_ts(self._timestamps[backup_idx + 1])
+                else:
+                    prev_lines = []
+                    fromfile = '(oldest)'
+                lines = _diff(prev_lines, selected_lines,
+                              fromfile=fromfile,
+                              tofile=_fmt_ts(self._timestamps[backup_idx]))
+            else:
+                lines = [line.rstrip('\n') for line in selected_lines]
+
         content_view.set_lines(lines, self._diff_mode)
         self._update_hints()
 
@@ -350,11 +373,12 @@ class TimeMachineApp(App):
         focused = self.focused
         d_hint = "[d] toggle diff"
         idx = self.query_one(VersionList).selected
-        n = len(self._timestamps)
         if isinstance(focused, ContentView):
             hints = f"[h] back to versions · [j/k] scroll · {d_hint} · [r] restore · [q] quit"
+        elif idx == 0:
+            hints = f"[j/k] select version · [l] view content · {d_hint} · [q] quit"
         else:
-            hints = f"[j/k] select version · [l] view content · {d_hint} · [r] restore · [q] quit · version {idx + 1}/{n}"
+            hints = f"[j/k] select version · [l] view content · {d_hint} · [r] restore · [q] quit"
         self.query_one("#hints", Static).update(Text(f"  {hints}"))
 
     def toggle_diff(self) -> None:
@@ -363,7 +387,11 @@ class TimeMachineApp(App):
 
     def restore(self) -> None:
         idx = self.query_one(VersionList).selected
-        ts_label = _fmt_ts(self._timestamps[idx])
+        if idx == 0:
+            self.notify("Already viewing the current version", severity="information")
+            return
+        backup_idx = idx - 1
+        ts_label = _fmt_ts(self._timestamps[backup_idx])
 
         def on_confirmed(confirmed: bool) -> None:
             if not confirmed:
@@ -371,7 +399,7 @@ class TimeMachineApp(App):
             from os_utils.backup_manager import BackupManager
             if os.path.exists(self._file_path):
                 BackupManager.backup(self._file_path, self._journal_dir)
-            shutil.copy2(self._backup_paths[idx], self._file_path)
+            shutil.copy2(self._backup_paths[backup_idx], self._file_path)
             self._current_lines = _read(self._file_path)
             backup_dir = os.path.dirname(self._backup_paths[0])
             new_backups = sorted(
@@ -380,7 +408,7 @@ class TimeMachineApp(App):
             )
             self._backup_paths = [os.path.join(backup_dir, b) for b in new_backups]
             self._timestamps   = [_extract_ts(b) for b in new_backups]
-            self.query_one(VersionList).update_list(self._timestamps)
+            self.query_one(VersionList).update_list(["Current"] + self._timestamps)
             self.refresh_content()
             self.notify(f"Restored {ts_label}", severity="information")
 
