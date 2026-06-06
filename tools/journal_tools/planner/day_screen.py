@@ -68,6 +68,7 @@ class DayGrid(Widget, can_focus=True):
         self._new_tasks: list[Task] = []
         self._deleted_tasks: list[Task] = []
         self._original_lines: dict[int, str] = {}
+        self._original_bodies: dict[int, str | None] = {}
 
     def on_mount(self) -> None:
         tasks = TaskParser.parse_file(self._file_path)
@@ -79,6 +80,9 @@ class DayGrid(Widget, can_focus=True):
         self._original_lines = {
             t.line_number: t.to_line() for t in tasks if t.line_number > 0
         }
+        self._original_bodies = {
+            t.line_number: t.body for t in tasks if t.line_number > 0
+        }
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -88,7 +92,8 @@ class DayGrid(Widget, can_focus=True):
 
         rel_path = os.path.relpath(self._file_path, self._directory)
         has_chg = has_changes(
-            self._timed_tasks, self._untimed_tasks, self._original_lines, self._new_tasks
+            self._timed_tasks, self._untimed_tasks, self._original_lines, self._new_tasks,
+            original_bodies=self._original_bodies,
         )
         marker = " *" if has_chg else ""
 
@@ -122,6 +127,7 @@ class DayGrid(Widget, can_focus=True):
                 bar_width = max(end_slot - start_slot + 1, 1)
                 icon_col = start_slot + bar_width + len(task.time.to_str()) + 2
                 lines.append(self._timed_task_row(task, selected))
+                lines.extend(self._body_rows(task, time_offset=icon_col))
                 lines.extend(self._subtask_rows(task, selected, time_offset=icon_col))
         else:
             lines.append(Text.assemble(_MARGIN, ("No timed tasks yet", "bright_black")))
@@ -133,6 +139,7 @@ class DayGrid(Widget, can_focus=True):
             )
             for task in self._untimed_tasks:
                 lines.append(self._untimed_task_row(task, selected))
+                lines.extend(self._body_rows(task))
                 lines.extend(self._subtask_rows(task, selected))
 
         if not self._timed_tasks and not self._untimed_tasks:
@@ -191,6 +198,19 @@ class DayGrid(Widget, can_focus=True):
         t.append(task.title[:title_max], style="bold reverse" if is_sel else "bold")
         return t
 
+    def _body_rows(self, task: Task, depth: int = 0, time_offset: int = 0) -> list[Text]:
+        if not task.body:
+            return []
+        rows = []
+        prefix = " " * time_offset + "  " * (depth + 1)
+        for line in task.body.split('\n'):
+            stripped = line.strip()
+            if stripped:
+                t = Text(_MARGIN + prefix)
+                t.append(stripped, style="bright_black italic")
+                rows.append(t)
+        return rows
+
     def _subtask_rows(self, task: Task, selected: Task | None, depth: int = 1, time_offset: int = 0) -> list[Text]:
         rows: list[Text] = []
         for child in task.children:
@@ -209,6 +229,7 @@ class DayGrid(Widget, can_focus=True):
                 t.append(icon, style="bright_black")
                 t.append(f" {child.title[:title_max]}", style="bright_black")
             rows.append(t)
+            rows.extend(self._body_rows(child, depth, time_offset))
             rows.extend(self._subtask_rows(child, selected, depth + 1, time_offset))
         return rows
 
@@ -226,7 +247,7 @@ class DayGrid(Widget, can_focus=True):
     def _has_changes(self) -> bool:
         return has_changes(
             self._timed_tasks, self._untimed_tasks, self._original_lines,
-            self._new_tasks, self._deleted_tasks,
+            self._new_tasks, self._deleted_tasks, self._original_bodies,
         )
 
     def _do_save(self) -> None:
@@ -238,6 +259,7 @@ class DayGrid(Widget, can_focus=True):
             self._original_lines,
             self._new_tasks,
             self._deleted_tasks,
+            self._original_bodies,
         )
         tasks = TaskParser.parse_file(self._file_path)
         self._timed_tasks = sorted(
@@ -247,6 +269,9 @@ class DayGrid(Widget, can_focus=True):
         self._untimed_tasks = [t for t in tasks if not t.time and t.parent is None]
         self._original_lines = {
             t.line_number: t.to_line() for t in tasks if t.line_number > 0
+        }
+        self._original_bodies = {
+            t.line_number: t.body for t in tasks if t.line_number > 0
         }
         self._new_tasks = []
         self._deleted_tasks = []

@@ -3,12 +3,15 @@ from parser import TaskParser
 from .utils import flatten_tasks
 
 
-def has_changes(timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None) -> bool:
+def has_changes(timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None, original_bodies=None) -> bool:
     if new_tasks or deleted_tasks:
         return True
     for task in flatten_tasks(timed_tasks + untimed_tasks):
         if task.line_number > 0 and task.line_number in original_lines:
             if original_lines[task.line_number] != task.to_line():
+                return True
+        if original_bodies and task.line_number > 0 and task.line_number in original_bodies:
+            if original_bodies[task.line_number] != task.body:
                 return True
     return False
 
@@ -35,24 +38,63 @@ def _deleted_line_numbers(deleted_tasks, original_lines) -> set:
     return to_remove
 
 
-def save(file_path, directory, timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None):
+def _body_lines(task) -> list[str]:
+    if not task.body:
+        return []
+    body_indent = (task.indent or '') + '    '
+    result = []
+    for line in task.body.split('\n'):
+        stripped = line.strip()
+        result.append(body_indent + stripped + '\n' if stripped else '\n')
+    return result
+
+
+def save(file_path, directory, timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None, original_bodies=None):
     BackupManager.backup(file_path, directory)
 
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    for task in flatten_tasks(timed_tasks + untimed_tasks):
-        if task.line_number in original_lines and original_lines[task.line_number] != task.to_line():
-            lines[task.line_number - 1] = task.to_line() + '\n'
+    all_tasks = flatten_tasks(timed_tasks + untimed_tasks)
 
-    if deleted_tasks:
-        remove = _deleted_line_numbers(deleted_tasks, original_lines)
-        lines = [ln for i, ln in enumerate(lines, 1) if i not in remove]
+    header_updates = {
+        task.line_number: task.to_line() + '\n'
+        for task in all_tasks
+        if task.line_number in original_lines and original_lines[task.line_number] != task.to_line()
+    }
+
+    body_remove: set[int] = set()
+    body_insert: dict[int, list[str]] = {}
+    if original_bodies:
+        for task in all_tasks:
+            if task.line_number > 0 and task.line_number in original_bodies:
+                if original_bodies[task.line_number] != task.body:
+                    body_remove.update(task.body_line_numbers)
+                    body_insert[task.line_number] = _body_lines(task)
+
+    delete_remove: set[int] = (
+        _deleted_line_numbers(deleted_tasks, original_lines) if deleted_tasks else set()
+    )
+
+    to_remove = body_remove | delete_remove
+
+    if header_updates or to_remove or body_insert:
+        new_lines = []
+        for i, line in enumerate(lines, 1):
+            if i in header_updates:
+                line = header_updates[i]
+            if i in to_remove:
+                continue
+            new_lines.append(line)
+            if i in body_insert:
+                new_lines.extend(body_insert[i])
+        lines = new_lines
 
     for task in new_tasks:
         if lines and lines[-1] != '\n':
             lines.append('\n')
         lines.append(task.to_line() + '\n')
+        lines.extend(_body_lines(task))
 
     FileWriter.write_atomic(file_path, lines)
 

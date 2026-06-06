@@ -1,3 +1,4 @@
+import textwrap
 from dataclasses import dataclass
 
 from textual.app import ComposeResult
@@ -96,7 +97,7 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
             )
             yield Label("Notes")
             yield TextArea(
-                text=task.body if task and task.body else "",
+                text=textwrap.dedent(task.body) if task and task.body else "",
                 id="body",
             )
             with HorizontalGroup(id="buttons"):

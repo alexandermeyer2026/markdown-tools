@@ -184,6 +184,45 @@ class TestTaskBody(unittest.TestCase):
         )
         self.assertIsNone(tasks[0].body)
 
+    def test_body_line_numbers_single(self):
+        tasks = _parse_block(
+            '- [ ] Task\n'   # line 1
+            '  Some note\n'  # line 2
+        )
+        self.assertEqual(tasks[0].body_line_numbers, [2])
+
+    def test_body_line_numbers_multiline(self):
+        tasks = _parse_block(
+            '- [ ] Task\n'    # line 1
+            '  First note\n'  # line 2
+            '  Second note\n' # line 3
+        )
+        self.assertEqual(tasks[0].body_line_numbers, [2, 3])
+
+    def test_body_line_numbers_empty_when_no_body(self):
+        tasks = _parse_block('- [ ] Task\n')
+        self.assertEqual(tasks[0].body_line_numbers, [])
+
+    def test_body_line_numbers_across_tasks(self):
+        tasks = _parse_block(
+            '- [ ] First\n'    # line 1
+            '  Note A\n'       # line 2  → First
+            '- [ ] Second\n'   # line 3
+            '  Note B\n'       # line 4  → Second
+        )
+        self.assertEqual(tasks[0].body_line_numbers, [2])
+        self.assertEqual(tasks[1].body_line_numbers, [4])
+
+    def test_body_line_numbers_interleaved_with_subtask(self):
+        tasks = _parse_block(
+            '- [ ] Parent\n'  # line 1
+            '  A note\n'      # line 2  → Parent body
+            '  - [ ] Child\n' # line 3
+            '  B note\n'      # line 4  → Parent body
+        )
+        parent = tasks[0]
+        self.assertEqual(parent.body_line_numbers, [2, 4])
+
 
 @pytest.mark.integration
 class TestSubtaskRelationships(unittest.TestCase):

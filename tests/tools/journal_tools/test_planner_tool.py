@@ -131,6 +131,58 @@ class TestSave(unittest.TestCase):
         self.assertIn('Eggs', result)
         self.assertIn('Call dentist', result)
 
+    def test_new_task_with_body_written_to_file(self):
+        new_task = Task(title='Dentist', status='todo', time=None, line_number=-1, indent='',
+                        body='Bring insurance card')
+        planner_save(self.path, self.directory, [], [], {}, [new_task])
+        result = self._read()
+        self.assertIn('- [ ] Dentist\n', result)
+        self.assertIn('    Bring insurance card\n', result)
+        lines = result.splitlines()
+        task_idx = next(i for i, l in enumerate(lines) if 'Dentist' in l)
+        self.assertEqual(lines[task_idx + 1], '    Bring insurance card')
+
+    def test_new_task_multiline_body_written(self):
+        new_task = Task(title='Plan', status='todo', time=None, line_number=-1, indent='',
+                        body='Line one\nLine two')
+        planner_save(self.path, self.directory, [], [], {}, [new_task])
+        result = self._read()
+        self.assertIn('    Line one\n', result)
+        self.assertIn('    Line two\n', result)
+
+    def test_edit_task_body_updates_file(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Old notes\n- [ ] Task B\n")
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        task_a, task_b = tasks[0], tasks[1]
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        original_bodies = {t.line_number: t.body for t in tasks}
+        task_a.body = 'New notes'
+        planner_save(self.path, self.directory, [], [task_a, task_b],
+                     original_lines, [], original_bodies=original_bodies)
+        result = self._read()
+        self.assertNotIn('Old notes', result)
+        self.assertIn('New notes', result)
+        self.assertIn('Task A', result)
+        self.assertIn('Task B', result)
+
+    def test_clearing_task_body_removes_lines(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Some notes\n- [ ] Task B\n")
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        task_a, task_b = tasks[0], tasks[1]
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        original_bodies = {t.line_number: t.body for t in tasks}
+        task_a.body = None
+        planner_save(self.path, self.directory, [], [task_a, task_b],
+                     original_lines, [], original_bodies=original_bodies)
+        result = self._read()
+        self.assertNotIn('Some notes', result)
+        self.assertIn('Task A', result)
+        self.assertIn('Task B', result)
+
     def test_new_task_on_file_with_trailing_blank_has_single_gap(self):
         # File ending with a trailing blank line must not produce a double blank gap
         # before the new task. sort_timed_tasks only fixes this when >=2 timed tasks
@@ -177,6 +229,39 @@ class TestHasChanges(unittest.TestCase):
         original_lines = {t.line_number: t.to_line() for t in self.tasks}
         self.assertFalse(planner_has_changes([parent], [], original_lines, []))
         self.assertTrue(planner_has_changes([parent], [], original_lines, [], [parent]))
+
+    def test_body_change_detected(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task\n    Some notes\n")
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        task = tasks[0]
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        original_bodies = {t.line_number: t.body for t in tasks}
+        self.assertFalse(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
+        task.body = 'Changed notes'
+        self.assertTrue(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
+
+    def test_body_cleared_detected(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task\n    Some notes\n")
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        task = tasks[0]
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        original_bodies = {t.line_number: t.body for t in tasks}
+        task.body = None
+        self.assertTrue(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
+
+    def test_body_unchanged_not_detected(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task\n    Some notes\n")
+        from parser.task_parser import TaskParser
+        tasks = TaskParser.parse_file(self.path)
+        task = tasks[0]
+        original_lines = {t.line_number: t.to_line() for t in tasks}
+        original_bodies = {t.line_number: t.body for t in tasks}
+        self.assertFalse(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
 
 
 class TestWeekCacheChanges(unittest.TestCase):
@@ -376,6 +461,10 @@ class TestDayGridInteraction(unittest.TestCase):
                 os.unlink(os.path.join(backup_dir, f))
             os.rmdir(backup_dir)
 
+    def _read(self):
+        with open(self.path, encoding='utf-8') as f:
+            return f.read()
+
     async def _inspect(self, keys):
         """Press keys and return (timed_tasks, untimed_tasks) from the grid."""
         app = PlannerApp(self.directory, file_path=self.path)
@@ -544,6 +633,112 @@ class TestDayGridInteraction(unittest.TestCase):
         self.assertEqual(new_tasks, [])
         with open(self.path) as f:
             self.assertEqual(f.read().count('Regression task'), 1)
+
+
+    # ── Task body ─────────────────────────────────────────────────────────────
+
+    def test_new_task_body_persisted_after_save(self):
+        from textual.widgets import Input, TextArea
+
+        async def run():
+            app = PlannerApp(self.directory, file_path=self.path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('n')
+                await pilot.pause()
+                app.screen.query_one('#title', Input).value = 'Dentist appointment'
+                app.screen.query_one('#body', TextArea).text = 'Bring insurance card'
+                await pilot.press('ctrl+s')   # save form
+                await pilot.pause()
+                await pilot.press('ctrl+s')   # open save dialog
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes')
+                    await pilot.pause()
+
+        asyncio.run(run())
+        content = self._read()
+        self.assertIn('Dentist appointment', content)
+        self.assertIn('Bring insurance card', content)
+        lines = content.splitlines()
+        task_idx = next(i for i, l in enumerate(lines) if 'Dentist appointment' in l)
+        self.assertTrue(lines[task_idx + 1].startswith('    '))
+        self.assertIn('Bring insurance card', lines[task_idx + 1])
+
+    def test_edit_task_body_persisted_after_save(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Old notes\n- [ ] Buy milk\n")
+
+        async def run():
+            from textual.widgets import TextArea
+            app = PlannerApp(self.directory, file_path=self.path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('enter')    # open edit form for Task A
+                await pilot.pause()
+                app.screen.query_one('#body', TextArea).text = 'New notes'
+                await pilot.press('ctrl+s')   # save form
+                await pilot.pause()
+                await pilot.press('ctrl+s')   # open save dialog
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes')
+                    await pilot.pause()
+                grid = app.screen.query_one(DayGrid)
+                return grid._has_changes()
+
+        has_chg = asyncio.run(run())
+        self.assertFalse(has_chg)
+        content = self._read()
+        self.assertNotIn('Old notes', content)
+        self.assertIn('New notes', content)
+        self.assertIn('Task A', content)
+        self.assertIn('Buy milk', content)
+
+    def test_clearing_task_body_persisted_after_save(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Old notes\n- [ ] Buy milk\n")
+
+        async def run():
+            from textual.widgets import TextArea
+            app = PlannerApp(self.directory, file_path=self.path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('enter')    # open edit form for Task A
+                await pilot.pause()
+                app.screen.query_one('#body', TextArea).text = ''
+                await pilot.press('ctrl+s')   # save form
+                await pilot.pause()
+                await pilot.press('ctrl+s')   # open save dialog
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes')
+                    await pilot.pause()
+
+        asyncio.run(run())
+        content = self._read()
+        self.assertNotIn('Old notes', content)
+        self.assertIn('Task A', content)
+        self.assertIn('Buy milk', content)
+
+    def test_edit_task_body_marks_dirty(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Some notes\n")
+
+        async def run():
+            from textual.widgets import TextArea
+            app = PlannerApp(self.directory, file_path=self.path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('enter')    # open edit form
+                await pilot.pause()
+                app.screen.query_one('#body', TextArea).text = 'Changed notes'
+                await pilot.press('ctrl+s')   # save form (not file)
+                await pilot.pause()
+                grid = app.screen.query_one(DayGrid)
+                return grid._has_changes()
+
+        self.assertTrue(asyncio.run(run()))
 
 
 class TestWeekGridInteraction(unittest.TestCase):
@@ -741,3 +936,43 @@ class TestTaskFormScreen(unittest.TestCase):
         asyncio.run(self._run_form(task=task, interact=interact))
         self.assertEqual(inspected["time_start"], "9:00")
         self.assertEqual(inspected["time_end"],   "10:00")
+
+    # ── Body (notes) ──────────────────────────────────────────────────────────
+
+    def test_save_captures_body(self):
+        from textual.widgets import Input, TextArea
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            screen.query_one('#title', Input).value = 'Task'
+            screen.query_one('#body', TextArea).text = 'My notes'
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        self.assertIsNotNone(dismissed[0])
+        self.assertEqual(dismissed[0].body, 'My notes')
+
+    def test_save_with_no_body_returns_none_body(self):
+        from textual.widgets import Input
+
+        async def interact(pilot):
+            pilot.app.screen.query_one('#title', Input).value = 'Task'
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        self.assertIsNone(dismissed[0].body)
+
+    def test_edit_mode_prefills_body_dedented(self):
+        from textual.widgets import TextArea
+        task = Task(title='Task', status='todo', time=None, line_number=1, indent='',
+                    body='    Indented note\n    Another line')
+        inspected = {}
+
+        async def interact(pilot):
+            inspected['body'] = pilot.app.screen.query_one('#body', TextArea).text
+            await pilot.press('escape')
+
+        asyncio.run(self._run_form(task=task, interact=interact))
+        self.assertIn('Indented note', inspected['body'])
+        self.assertNotIn('    Indented note', inspected['body'])
+        self.assertIn('Another line', inspected['body'])
