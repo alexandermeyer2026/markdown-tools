@@ -557,6 +557,19 @@ class TestWeekGridInteraction(unittest.TestCase):
         self.assertEqual(state.day(2).task_list[0].status, 'in progress')
         self.assertEqual(state.day(2).task_list[0].children, [])
 
+    def test_carry_skips_started_subtasks(self):
+        # Task with a todo sub and a started sub; > should carry only the todo sub.
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write("- [ ] My task\n  - [ ] Todo sub\n  - [~] Started sub\n")
+        state, col, row = asyncio.run(self._inspect(['>']))
+        # Started sub stays on Wednesday with the parent
+        self.assertEqual([c.title for c in state.day(2).task_list[0].children], ['Started sub'])
+        # Todo sub is carried to Thursday inside a new wrapper task
+        thu = state.day(3).task_list
+        self.assertEqual(len(thu), 1)
+        self.assertEqual(thu[0].title, 'My task')
+        self.assertEqual([c.title for c in thu[0].children], ['Todo sub'])
+
 
 class TestTaskFormScreen(unittest.TestCase):
     """Pilot-driven tests for TaskFormScreen create/edit/cancel behaviour."""

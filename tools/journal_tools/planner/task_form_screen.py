@@ -21,6 +21,7 @@ class TaskFormResult:
 _STATUS_OPTIONS: list[tuple[str, str]] = [
     ("○  Todo",        "todo"),
     ("◐  In progress", "in progress"),
+    ("~  Started",     "started"),
     ("✓  Done",        "done"),
     ("✗  Failed",      "failed"),
 ]

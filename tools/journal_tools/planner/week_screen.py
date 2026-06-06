@@ -40,14 +40,15 @@ class WeekGrid(Widget, can_focus=True):
         Binding("H",     "move_left",         show=False),
         Binding("L",     "move_right",        show=False),
         Binding(">",     "carry_subtasks",    show=False),
-        Binding("t",     "status_todo",       show=False),
-        Binding("i",     "status_in_progress",show=False),
-        Binding("d",     "status_done",       show=False),
-        Binding("f",     "status_failed",     show=False),
-        Binding("enter", "open_or_edit",      show=False),
-        Binding("n",     "new_task",          show=False),
-        Binding("D",     "delete_task",       show=False),
-        Binding("s",     "save",              show=False),
+        Binding("t",      "status_todo",        show=False),
+        Binding("i",      "status_in_progress", show=False),
+        Binding("s",      "status_started",     show=False),
+        Binding("d",      "status_done",        show=False),
+        Binding("f",      "status_failed",      show=False),
+        Binding("enter",  "open_or_edit",       show=False),
+        Binding("n",      "new_task",           show=False),
+        Binding("D",      "delete_task",        show=False),
+        Binding("ctrl+s", "save",               show=False),
         Binding("q",     "quit",              show=False),
         Binding("ctrl+c","quit",              show=False),
     ]
@@ -138,7 +139,7 @@ class WeekGrid(Widget, can_focus=True):
         lines.append(Text(""))
         hints = (
             "[h/j/k/l] navigate  [H/L] move  [>] carry  "
-            "[t/i/d/f] status  [Enter] open/edit  [n] new  [s] save  [q] quit"
+            "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [q] quit"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -251,6 +252,7 @@ class WeekGrid(Widget, can_focus=True):
 
     def action_status_todo(self)        -> None: self._set_status("todo")
     def action_status_in_progress(self) -> None: self._set_status("in progress")
+    def action_status_started(self)     -> None: self._set_status("started")
     def action_status_done(self)        -> None: self._set_status("done")
     def action_status_failed(self)      -> None: self._set_status("failed")
 
@@ -293,10 +295,10 @@ class WeekGrid(Widget, can_focus=True):
         task = exp[self.cursor_row]
         if task.parent is not None:
             return
-        unfinished = [c for c in task.children if c.status not in ("done", "failed")]
+        unfinished = [c for c in task.children if c.status not in ("done", "failed", "started")]
         if not unfinished:
             return
-        task.children = [c for c in task.children if c.status in ("done", "failed")]
+        task.children = [c for c in task.children if c.status in ("done", "failed", "started")]
         day_key = self._state.week_days[self.cursor_col].isoformat()
         self._state.cache[day_key].moved_subtasks.extend(unfinished)
         tomorrow = self._state.week_days[self.cursor_col] + datetime.timedelta(days=1)

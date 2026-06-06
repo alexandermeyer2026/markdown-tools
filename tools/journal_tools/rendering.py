@@ -26,6 +26,7 @@ STATUS_COLORS: dict[str, str] = {
     'in progress': '\x1b[34m',
     'done':        '\x1b[32m',
     'failed':      '\x1b[31m',
+    'started':     '\x1b[33m',
 }
 BOLD  = '\x1b[1m'
 GRAY  = '\x1b[90m'

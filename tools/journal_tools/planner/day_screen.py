@@ -38,14 +38,15 @@ class DayGrid(Widget, can_focus=True):
         Binding("H",     "shrink_end",    show=False),
         Binding("L",     "extend_end",    show=False),
         Binding("r",     "remove_time",   show=False),
-        Binding("t",     "status_todo",   show=False),
-        Binding("i",     "status_in_progress", show=False),
-        Binding("d",     "status_done",   show=False),
-        Binding("f",     "status_failed", show=False),
-        Binding("enter", "edit_task",     show=False),
-        Binding("n",     "new_task",      show=False),
-        Binding("D",     "delete_task",   show=False),
-        Binding("s",     "save",          show=False),
+        Binding("t",      "status_todo",        show=False),
+        Binding("i",      "status_in_progress", show=False),
+        Binding("s",      "status_started",     show=False),
+        Binding("d",      "status_done",        show=False),
+        Binding("f",      "status_failed",      show=False),
+        Binding("enter",  "edit_task",          show=False),
+        Binding("n",      "new_task",           show=False),
+        Binding("D",      "delete_task",        show=False),
+        Binding("ctrl+s", "save",               show=False),
         Binding("q",     "quit",          show=False),
         Binding("ctrl+c","quit",          show=False),
     ]
@@ -143,7 +144,7 @@ class DayGrid(Widget, can_focus=True):
         lines.append(Text(""))
         hints = (
             "[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  "
-            "[n] new  [Enter] edit  [t/i/d/f] status  [s] save  [q] back"
+            "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [q] back"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -329,6 +330,7 @@ class DayGrid(Widget, can_focus=True):
 
     def action_status_todo(self)        -> None: self._set_status("todo")
     def action_status_in_progress(self) -> None: self._set_status("in progress")
+    def action_status_started(self)     -> None: self._set_status("started")
     def action_status_done(self)        -> None: self._set_status("done")
     def action_status_failed(self)      -> None: self._set_status("failed")
 
