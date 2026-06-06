@@ -496,6 +496,55 @@ class TestDayGridInteraction(unittest.TestCase):
         with open(self.path) as f:
             self.assertEqual(f.read(), content_before)
 
+    async def _change_and_save(self, change_keys):
+        """Press change_keys, save with ctrl+s + confirm, return grid snapshot."""
+        app = PlannerApp(self.directory, file_path=self.path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            for key in change_keys:
+                await pilot.press(key)
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            if isinstance(app.screen, SaveDialog):
+                await pilot.click('#yes')
+                await pilot.pause()
+            grid = app.screen.query_one(DayGrid)
+            return grid._has_changes(), list(grid._new_tasks), list(grid._deleted_tasks)
+
+    def test_save_clears_dirty_flag_after_status_change(self):
+        # Regression: _original_lines was not reloaded after save, leaving the
+        # dirty flag set so the user could keep re-saving with no visible effect.
+        has_chg, _, _ = asyncio.run(self._change_and_save(['d']))
+        self.assertFalse(has_chg)
+
+    def test_save_clears_new_tasks_list_to_prevent_duplicates(self):
+        # Regression: _new_tasks was not cleared after save, so a second save
+        # would append the task again and produce duplicates in the file.
+        from textual.widgets import Input
+
+        async def run():
+            app = PlannerApp(self.directory, file_path=self.path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('n')
+                await pilot.pause()
+                app.screen.query_one('#title', Input).value = 'Regression task'
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes')
+                    await pilot.pause()
+                grid = app.screen.query_one(DayGrid)
+                return grid._has_changes(), list(grid._new_tasks)
+
+        has_chg, new_tasks = asyncio.run(run())
+        self.assertFalse(has_chg)
+        self.assertEqual(new_tasks, [])
+        with open(self.path) as f:
+            self.assertEqual(f.read().count('Regression task'), 1)
+
 
 class TestWeekGridInteraction(unittest.TestCase):
     """Pilot-driven tests for WeekScreen interaction logic."""

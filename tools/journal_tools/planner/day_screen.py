@@ -239,6 +239,17 @@ class DayGrid(Widget, can_focus=True):
             self._new_tasks,
             self._deleted_tasks,
         )
+        tasks = TaskParser.parse_file(self._file_path)
+        self._timed_tasks = sorted(
+            [t for t in tasks if t.time and t.parent is None],
+            key=lambda t: get_minutes(t.time.start),
+        )
+        self._untimed_tasks = [t for t in tasks if not t.time and t.parent is None]
+        self._original_lines = {
+            t.line_number: t.to_line() for t in tasks if t.line_number > 0
+        }
+        self._new_tasks = []
+        self._deleted_tasks = []
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
