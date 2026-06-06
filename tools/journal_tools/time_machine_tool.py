@@ -151,6 +151,7 @@ class VersionList(Widget, can_focus=True):
     VersionList {
         width: 24;
         height: 1fr;
+        border: solid $primary;
     }
     """
 
@@ -213,7 +214,7 @@ class ContentView(Widget, can_focus=True):
     ContentView {
         width: 1fr;
         height: 1fr;
-        border-left: solid $primary;
+        border: solid $primary;
     }
     """
 
@@ -292,6 +293,12 @@ class TimeMachineApp(App):
         color: $background;
         padding: 0 2;
     }
+    VersionList:focus {
+        border: solid $warning;
+    }
+    ContentView:focus {
+        border: solid $warning;
+    }
     """
 
     BINDINGS = [
@@ -341,14 +348,14 @@ class TimeMachineApp(App):
 
     def _update_hints(self) -> None:
         focused = self.focused
-        d_hint = "[d] content" if self._diff_mode else "[d] diff"
+        d_hint = "[d] toggle diff"
         idx = self.query_one(VersionList).selected
         n = len(self._timestamps)
         if isinstance(focused, ContentView):
-            hints = f"[h] →versions  [j/k] scroll  {d_hint}  [r] restore  [q] quit"
+            hints = f"[h] back to versions · [j/k] scroll · {d_hint} · [r] restore · [q] quit"
         else:
-            hints = f"[j/k] version  [l] →content  {d_hint}  [r] restore  [q] quit  ({idx + 1}/{n})"
-        self.query_one("#hints", Static).update(f"  {hints}")
+            hints = f"[j/k] select version · [l] view content · {d_hint} · [r] restore · [q] quit · version {idx + 1}/{n}"
+        self.query_one("#hints", Static).update(Text(f"  {hints}"))
 
     def toggle_diff(self) -> None:
         self._diff_mode = not self._diff_mode
