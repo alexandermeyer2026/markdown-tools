@@ -230,6 +230,7 @@ class UpdateTool:
         if not upcoming_by_date:
             lines.append(pad(f"  {GRAY}–{RESET}"))
             return lines
+        tomorrow = today + datetime.timedelta(days=1)
         for i, date in enumerate(sorted(upcoming_by_date)):
             tasks = upcoming_by_date[date]
             timed   = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
@@ -239,11 +240,20 @@ class UpdateTool:
             if i > 0:
                 lines.append(' ' * col_w)
             lines.append(pad(f"  {BOLD}{label}{RESET}"))
-            for task in timed + untimed:
-                icon        = STATUS_ICONS.get(task.status, '○')
-                color       = STATUS_COLORS.get(task.status, GRAY)
-                time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
-                lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
+            if date == tomorrow and timed:
+                for line in TimelineTool.render_timeline_lines(timed, date, col_w - 2):
+                    lines.append(pad('  ' + line))
+            else:
+                for task in timed:
+                    icon        = STATUS_ICONS.get(task.status, '○')
+                    color       = STATUS_COLORS.get(task.status, GRAY)
+                    time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}"
+                    lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
+                    lines.extend(UpdateTool._subtask_lines(task, pad))
+            for task in untimed:
+                icon  = STATUS_ICONS.get(task.status, '○')
+                color = STATUS_COLORS.get(task.status, GRAY)
+                lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
                 lines.extend(UpdateTool._subtask_lines(task, pad))
         return lines
 
