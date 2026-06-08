@@ -9,3 +9,4 @@ dist/
 !.env.example
 *.swp
 webapp/nginx/nginx.conf
+graphify-out/
