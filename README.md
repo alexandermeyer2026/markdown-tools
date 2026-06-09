@@ -1,27 +1,13 @@
 # Markdown Tools
 
-A modular toolset for editing and managing knowledge and tasks in markdown files. Instead of relying on heavy-weight project management software, this project provides a collection of independent tools that work with plain markdown files, the universal format that works everywhere.
+## What is this?
 
-## Philosophy
+markdown-tools is a modular, command-line toolkit for working with data stored
+in plain markdown files.
 
-Markdown is the lingua franca of knowledge management. It's human-readable, version-controllable, and compatible with virtually every tool and platform. By building tools that operate on markdown files, you create solutions that are:
-
-- **Cross-software compatible**: Import/export to Notion, Obsidian, GitHub, and countless other platforms are possible
-- **Future-proof**: Your data isn't locked into proprietary formats
-- **Modular**: Each tool solves a specific problem independently
-- **Extensible**: Anyone can contribute new tools that work with the same markdown files
-
-## Why Markdown Tools?
-
-Traditional project management software often comes with:
-
-- Vendor lock-in
-- Complex interfaces that get in the way
-- Limited customization
-- High costs
-- Data silos
-
-Markdown Tools takes a different approach: your data lives in markdown files that you control, and tools are built around your workflow, not the other way around.
+Markdown is human-readable, version-controllable, and supported everywhere.
+This project provides tools that operate directly on `.md` files — so your data
+stays accessible and portable, independent of any specific application.
 
 ## Installation
 
@@ -86,16 +72,17 @@ journal() {
 
 ## Available Tools
 
-All tools operate on the `journal` command and are designed to work independently:
+Tools are designed to work independently:
 
 | Command | Description |
 |---|---|
-| `journal <date>` | Open a journal file for a specific date in Vim |
-| `journal today` | Open today's journal file |
-| `journal timeline [file]` | Visual timeline of tasks across journal files |
+| `journal <date>` | Open a journal file in Vim (`today`, `yesterday`, `tomorrow`, or `YYYY-MM-DD`) |
+| `journal timeline <file>` | Visual timeline of a day's tasks |
 | `journal catch-up` | Step through past journal files with unresolved tasks |
 | `journal planner` | Interactive planner for scheduling tasks |
 | `journal update` | Dashboard overview of open and upcoming tasks |
+| `journal time-machine <file>` | Browse and restore previous versions of a file |
+| `journal sync` | Push and pull files to a self-hosted server |
 
 ## Project Structure
 
@@ -139,4 +126,4 @@ MIT – see [LICENSE](LICENSE) for details.
 
 ## Vision
 
-Knowledge and task management shouldn't be constrained by software limitations. Every tool you need, working with files you control, in formats that will outlast any software vendor.
+Your data should be accessible and long-lived, independent of any application. Every tool you need, working with files you control, in a format that works everywhere.
