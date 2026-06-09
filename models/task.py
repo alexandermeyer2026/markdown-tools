@@ -37,6 +37,7 @@ class Task:
     line_number: int
     indent: str = ''
     body: Optional[str] = None
+    body_line_numbers: list[int] = field(default_factory=list, compare=False, repr=False)
     parent: Optional[Task] = field(default=None, compare=False, repr=False)
     children: list[Task] = field(default_factory=list, compare=False, repr=False)
 

@@ -7,7 +7,7 @@ from os_utils import FileFinder
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
-    ansi_truncate_pad, get_minutes,
+    ansi_truncate_pad, body_rows, get_minutes,
 )
 from tools.journal_tools.timeline_tool import TimelineTool
 
@@ -131,24 +131,32 @@ class UpdateTool:
 
     @staticmethod
     def _header_and_calendar(today, now):
+        cols = UpdateTool._cols()
+
         day_name = today.strftime('%A')
         date_str = today.strftime('%-d %B %Y')
         week_num = today.isocalendar()[1]
-        header   = f"  {BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
+
+        header_vis = f"{day_name}, {date_str}  ·  Week {week_num}"
+        header_pad = ' ' * max(0, (cols - len(header_vis)) // 2)
+        header     = f"{header_pad}{BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
 
         clock_lines = UpdateTool._big_clock_lines(now)
         cal_lines   = UpdateTool._calendar_lines(today)
 
-        gap   = '   '
-        n     = len(cal_lines)
-        pad   = max(0, (n - 5) // 2)
-        empty = ' ' * UpdateTool._CLOCK_VISUAL_W
+        gap    = '   '
+        n      = len(cal_lines)
+        pad_r  = max(0, (n - 5) // 2)
+        empty  = ' ' * UpdateTool._CLOCK_VISUAL_W
 
-        clock_padded = [empty] * pad + clock_lines + [empty] * (n - pad - 5)
+        clock_padded = [empty] * pad_r + clock_lines + [empty] * (n - pad_r - 5)
+
+        block_w   = UpdateTool._CLOCK_VISUAL_W + len(gap) + 29  # clock + gap + calendar
+        block_pad = ' ' * max(0, (cols - block_w) // 2)
 
         result = [header]
         for c, cal in zip(clock_padded, cal_lines):
-            result.append(c + gap + cal)
+            result.append(block_pad + c + gap + cal)
         return result
 
     # ── Three-column layout ───────────────────────────────────────────────────
@@ -167,9 +175,9 @@ class UpdateTool:
                 lines.append(pad(
                     f"  {RED}{icon}{RESET}  {GRAY}{date.strftime('%a %-d %b')}{RESET}  {task.title}"
                 ))
-                for child in task.children:
-                    cicon = STATUS_ICONS.get(child.status, '○')
-                    lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
+                for bline in body_rows(task, left_pad=2):
+                    lines.append(pad(bline))
+                lines.extend(UpdateTool._subtask_lines(task, pad))
         return lines
 
     @staticmethod
@@ -207,10 +215,22 @@ class UpdateTool:
             icon  = STATUS_ICONS.get(task.status, '○')
             color = STATUS_COLORS.get(task.status, GRAY)
             lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
-            for child in task.children:
-                cicon = STATUS_ICONS.get(child.status, '○')
-                lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
+            for bline in body_rows(task, left_pad=2):
+                lines.append(pad(bline))
+            lines.extend(UpdateTool._subtask_lines(task, pad))
 
+        return lines
+
+    @staticmethod
+    def _subtask_lines(task, pad, depth=1):
+        lines = []
+        for child in task.children:
+            cicon  = STATUS_ICONS.get(child.status, '○')
+            indent = '  ' * (depth + 2)
+            lines.append(pad(f"{indent}{GRAY}{cicon} {child.title}{RESET}"))
+            for bline in body_rows(child, left_pad=0, depth=depth + 2):
+                lines.append(pad(bline))
+            lines.extend(UpdateTool._subtask_lines(child, pad, depth + 1))
         return lines
 
     @staticmethod
@@ -220,6 +240,7 @@ class UpdateTool:
         if not upcoming_by_date:
             lines.append(pad(f"  {GRAY}–{RESET}"))
             return lines
+        tomorrow = today + datetime.timedelta(days=1)
         for i, date in enumerate(sorted(upcoming_by_date)):
             tasks = upcoming_by_date[date]
             timed   = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
@@ -229,15 +250,25 @@ class UpdateTool:
             if i > 0:
                 lines.append(' ' * col_w)
             lines.append(pad(f"  {BOLD}{label}{RESET}"))
-            for task in timed + untimed:
-                icon        = STATUS_ICONS.get(task.status, '○')
-                color       = STATUS_COLORS.get(task.status, GRAY)
-                time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}" if task.time else ''
-                lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
-                if not task.time:
-                    for child in task.children:
-                        cicon = STATUS_ICONS.get(child.status, '○')
-                        lines.append(pad(f"      {GRAY}{cicon} {child.title}{RESET}"))
+            if date == tomorrow and timed:
+                for line in TimelineTool.render_timeline_lines(timed, date, col_w - 2):
+                    lines.append(pad('  ' + line))
+            else:
+                for task in timed:
+                    icon        = STATUS_ICONS.get(task.status, '○')
+                    color       = STATUS_COLORS.get(task.status, GRAY)
+                    time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}"
+                    lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
+                    for bline in body_rows(task, left_pad=2):
+                        lines.append(pad(bline))
+                    lines.extend(UpdateTool._subtask_lines(task, pad))
+            for task in untimed:
+                icon  = STATUS_ICONS.get(task.status, '○')
+                color = STATUS_COLORS.get(task.status, GRAY)
+                lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
+                for bline in body_rows(task, left_pad=2):
+                    lines.append(pad(bline))
+                lines.extend(UpdateTool._subtask_lines(task, pad))
         return lines
 
     @staticmethod
