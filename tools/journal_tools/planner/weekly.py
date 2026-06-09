@@ -206,6 +206,9 @@ def save_cache(cache: dict, directory: str) -> None:
             for t in flatten_tasks([subtask]):
                 if 0 < t.line_number <= len(lines):
                     rs.add(t.line_number)
+                for ln in t.body_line_numbers:
+                    if 0 < ln <= len(lines):
+                        rs.add(ln)
         day.moved_subtasks.clear()
 
     for key, day in cache.items():

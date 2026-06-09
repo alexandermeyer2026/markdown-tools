@@ -419,6 +419,11 @@ class PlannerIntegrationTest(unittest.TestCase):
     def test_week_carry_then_cross_week_move(self):
         self._run_fixture('week_carry_then_cross_week_move')
 
+    def test_week_carry_subtask_notes(self):
+        # Regression: body text on a carried subtask was dropped from the destination
+        # and left as orphaned lines in the source.
+        self._run_fixture('week_carry_subtask_notes')
+
     def test_week_delete_two_nonadjacent(self):
         # Two deletions targeting lines 3 and 6 in the same save; verifies that
         # both use their original line numbers simultaneously (not sequentially,
@@ -813,6 +818,17 @@ class TestWeekGridInteraction(unittest.TestCase):
         self.assertEqual(len(thu), 1)
         self.assertEqual(thu[0].title, 'My task')
         self.assertEqual([c.title for c in thu[0].children], ['Todo sub'])
+
+    def test_carry_preserves_subtask_body_in_memory(self):
+        # Subtask with body text; body should be present on the carried child in memory.
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write("- [ ] My task\n  - [ ] Sub\n      Sub notes\n")
+        state, col, row = asyncio.run(self._inspect(['>']))
+        thu = state.day(3).task_list
+        self.assertEqual(len(thu), 1)
+        self.assertEqual(len(thu[0].children), 1)
+        self.assertIn('Sub notes', thu[0].children[0].body)
+
 
 
 class TestTaskFormScreen(unittest.TestCase):

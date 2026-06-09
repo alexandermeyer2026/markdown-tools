@@ -11,6 +11,11 @@ def flatten_tasks(tasks: list) -> list:
 
 def task_to_lines(task: Task) -> list[str]:
     lines = [task.to_line() + '\n']
+    if task.body:
+        body_indent = (task.indent or '') + '    '
+        for line in task.body.split('\n'):
+            stripped = line.strip()
+            lines.append(body_indent + stripped + '\n' if stripped else '\n')
     for child in task.children:
         lines.extend(task_to_lines(child))
     return lines
