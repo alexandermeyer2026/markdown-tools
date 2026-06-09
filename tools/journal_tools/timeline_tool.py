@@ -6,8 +6,9 @@ from models import Task
 from os_utils import FileFinder, resolve_date
 from parser import TaskParser
 from tools.journal_tools.rendering import (
-    STATUS_ICONS, STATUS_COLORS, GRAY, RESET,
+    STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,
     get_minutes, get_time_slot, scale_lines, body_rows, subtask_rows,
+    insert_now_marker,
 )
 
 _STEP_SIZES = [0.25, 0.5, 1]
@@ -110,12 +111,25 @@ class TimelineTool:
             now_marker_slot = get_time_slot(now.hour * 60 + now.minute, step)
 
         hours_line, scale_line = scale_lines(step, first_task_slot, now_marker_slot)
+
+        if now_marker_slot is not None:
+            now_col = now_marker_slot - first_task_slot
+            hours_line = insert_now_marker(hours_line, now_col)
+            scale_line = scale_line[:now_col] + WHITE + '▼' + RESET + scale_line[now_col + 1:]
+
         lines = [hours_line, scale_line]
         for task in timed_tasks:
             icon_col = TimelineTool._icon_col(task, step, first_task_slot)
-            lines.append(TimelineTool.render_task(task, step, first_task_slot, now_marker_slot))
-            lines.extend(body_rows(task, left_pad=icon_col))
-            lines.extend(subtask_rows(task, left_pad=icon_col))
+            task_line = TimelineTool.render_task(task, step, first_task_slot, now_marker_slot)
+            task_body = body_rows(task, left_pad=icon_col)
+            task_subtasks = subtask_rows(task, left_pad=icon_col)
+            if now_marker_slot is not None:
+                task_line = insert_now_marker(task_line, now_col)
+                task_body = [insert_now_marker(l, now_col) for l in task_body]
+                task_subtasks = [insert_now_marker(l, now_col) for l in task_subtasks]
+            lines.append(task_line)
+            lines.extend(task_body)
+            lines.extend(task_subtasks)
 
         return lines
 

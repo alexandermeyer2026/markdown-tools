@@ -31,6 +31,7 @@ STATUS_COLORS: dict[str, str] = {
 BOLD   = '\x1b[1m'
 ITALIC = '\x1b[3m'
 GRAY   = '\x1b[90m'
+WHITE  = '\x1b[97m'
 RED    = '\x1b[31m'
 GREEN  = '\x1b[32m'
 RESET  = '\x1b[0m'
@@ -59,6 +60,46 @@ def scale_lines(step_size_hours: float, first_slot: int, now_slot: int | None) -
         scale = scale[:now_slot] + '▼' + scale[now_slot + 1:]
 
     return (hours + '24')[first_slot:], scale[first_slot:]
+
+
+def insert_now_marker(line: str, col: int) -> str:
+    """Insert a gray │ at col — only in the leading blank margin or after the content ends."""
+    # First pass: find content_start (first non-space visible col) and total visible length.
+    content_start = None
+    visible = 0
+    i = 0
+    while i < len(line):
+        m = _ANSI_RE.match(line, i)
+        if m:
+            i = m.end()
+        else:
+            if line[i] != ' ' and content_start is None:
+                content_start = visible
+            visible += 1
+            i += 1
+    if content_start is None:
+        content_start = visible  # line is all spaces
+
+    if col >= content_start and col < visible:
+        return line  # col lands inside content — skip
+
+    if col >= visible:
+        return line + ' ' * (col - visible) + GRAY + '│' + RESET
+
+    # col is in leading blank margin — replace the space
+    out = []
+    vis = 0
+    i = 0
+    while i < len(line):
+        m = _ANSI_RE.match(line, i)
+        if m:
+            out.append(m.group())
+            i = m.end()
+        else:
+            out.append(GRAY + '│' + RESET if vis == col else line[i])
+            vis += 1
+            i += 1
+    return ''.join(out)
 
 
 def body_rows(task: Task, left_pad: int = 0, depth: int = 0) -> list[str]:

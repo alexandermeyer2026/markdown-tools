@@ -110,12 +110,11 @@ class DayGrid(Widget, can_focus=True):
 
             hours_str, scale_str = scale_lines(_STEP, 0, now_slot)
             hours_text = Text(_MARGIN + hours_str)
-            scale_text = Text(_MARGIN)
-            for i, ch in enumerate(scale_str):
-                if now_slot is not None and i == now_slot:
-                    scale_text.append(ch, style="bold yellow")
-                else:
-                    scale_text.append(ch, style="bright_black")
+            scale_text = Text(_MARGIN + scale_str, style="bright_black")
+            if now_slot is not None:
+                now_col = len(_MARGIN) + now_slot
+                scale_text.stylize("white", now_col, now_col + 1)
+                hours_text = self._insert_now_col(hours_text, now_col)
             lines.append(hours_text)
             lines.append(scale_text)
 
@@ -126,9 +125,16 @@ class DayGrid(Widget, can_focus=True):
                     end_slot = get_time_slot(get_minutes(task.time.end) - 1, _STEP)
                 bar_width = max(end_slot - start_slot + 1, 1)
                 icon_col = start_slot + bar_width + len(task.time.to_str()) + 2
-                lines.append(self._timed_task_row(task, selected))
-                lines.extend(self._body_rows(task, time_offset=icon_col))
-                lines.extend(self._subtask_rows(task, selected, time_offset=icon_col))
+                task_row = self._timed_task_row(task, selected)
+                task_body = self._body_rows(task, time_offset=icon_col)
+                task_subs = self._subtask_rows(task, selected, time_offset=icon_col)
+                if now_slot is not None:
+                    task_row = self._insert_now_col(task_row, now_col)
+                    task_body = [self._insert_now_col(l, now_col) for l in task_body]
+                    task_subs = [self._insert_now_col(l, now_col) for l in task_subs]
+                lines.append(task_row)
+                lines.extend(task_body)
+                lines.extend(task_subs)
         else:
             lines.append(Text.assemble(_MARGIN, ("No timed tasks yet", "bright_black")))
 
@@ -234,6 +240,18 @@ class DayGrid(Widget, can_focus=True):
         return rows
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _insert_now_col(t: Text, col: int) -> Text:
+        plain = t.plain
+        content_start = next((i for i, c in enumerate(plain) if c != ' '), len(plain))
+        if col >= content_start and col < len(plain):
+            return t  # col lands inside content — skip
+        if col >= len(plain):
+            pad = col - len(plain)
+            return Text.assemble(t, Text(" " * pad + "│", style="bright_black"))
+        # col is in leading blank margin
+        return Text.assemble(t[:col], Text("│", style="bright_black"), t[col + 1:])
 
     def _navigable(self) -> list[Task]:
         return flatten_tasks(self._timed_tasks + self._untimed_tasks)
