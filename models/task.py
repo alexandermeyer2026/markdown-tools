@@ -4,6 +4,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from config import get_task_config
+
+
+def status_char_map() -> dict[str, str]:
+    """Return the canonical write character for each status, derived from task_config.yaml."""
+    return {
+        status: chars[0]
+        for status, chars in get_task_config()['status_chars'].items()
+        if chars
+    }
+
 
 def get_minutes(time_str: str) -> int:
     m = re.match(r'(\d{1,2}):(\d{2})', time_str)
@@ -41,16 +52,8 @@ class Task:
     parent: Optional[Task] = field(default=None, compare=False, repr=False)
     children: list[Task] = field(default_factory=list, compare=False, repr=False)
 
-    STATUS_CHAR = {
-        'todo': ' ',
-        'in progress': '…',
-        'done': 'x',
-        'failed': '–',
-        'started': '~',
-    }
-
     def to_line(self) -> str:
-        status_char = self.STATUS_CHAR.get(self.status, '?')
+        status_char = status_char_map().get(self.status, '?')
         line = f"{self.indent}- [{status_char}]"
         if self.time:
             line += f" {self.time.to_str()}"

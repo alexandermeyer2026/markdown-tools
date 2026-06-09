@@ -7,7 +7,7 @@ from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
 from parser.task_parser import TaskParser
-from models.task import Task
+from models.task import Task, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter
 
@@ -50,7 +50,8 @@ def get_tasks(date: str, _user=Depends(get_current_user)):
 
 @router.post("/{date}")
 def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_user)):
-    if req.status not in Task.STATUS_CHAR:
+    char_map = status_char_map()
+    if req.status not in char_map:
         raise HTTPException(status_code=400, detail=f"Invalid status")
 
     path = resolve_journal_file(date)
@@ -66,7 +67,7 @@ def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_use
     if "\n" in req.title or "\r" in req.title:
         raise HTTPException(status_code=400, detail="Title cannot contain newlines")
 
-    char = Task.STATUS_CHAR[req.status]
+    char = char_map[req.status]
     line = f"- [{char}] {time_part}{req.title}\n"
 
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -84,10 +85,11 @@ def update_task_status(
     req: UpdateTaskRequest,
     _user=Depends(get_current_user),
 ):
-    if req.status not in Task.STATUS_CHAR:
+    char_map = status_char_map()
+    if req.status not in char_map:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid status. Valid values: {list(Task.STATUS_CHAR.keys())}",
+            detail=f"Invalid status. Valid values: {list(char_map.keys())}",
         )
 
     path = resolve_journal_file(date)
