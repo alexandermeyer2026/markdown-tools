@@ -2,7 +2,7 @@
 
 ## What is this?
 
-markdown-tools is a modular, command-line toolkit for working with data stored
+markdown-tools is a modular command-line toolkit for working with data stored
 in plain markdown files.
 
 Markdown is human-readable, version-controllable, and supported everywhere.
