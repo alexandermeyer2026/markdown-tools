@@ -199,28 +199,31 @@ class TestSortTimedTasks(unittest.TestCase):
 
     def test_two_tasks_out_of_order(self):
         content = '- [ ] 10:00 B\n- [ ] 09:00 A\n'
-        self.assertEqual(self._sort(content), '- [ ] 09:00 A\n\n- [ ] 10:00 B\n')
+        self.assertEqual(self._sort(content), '- [ ] 09:00 A\n- [ ] 10:00 B\n')
 
     def test_already_sorted_unchanged(self):
         content = '- [ ] 09:00 A\n- [ ] 10:00 B\n'
+        self.assertEqual(self._sort(content), '- [ ] 09:00 A\n- [ ] 10:00 B\n')
+
+    def test_existing_blank_lines_preserved_between_tasks(self):
+        content = '- [ ] 10:00 B\n\n- [ ] 09:00 A\n'
         self.assertEqual(self._sort(content), '- [ ] 09:00 A\n\n- [ ] 10:00 B\n')
 
     def test_three_tasks_sorted(self):
         content = '- [ ] 11:00 C\n- [ ] 09:00 A\n- [ ] 10:00 B\n'
-        self.assertEqual(self._sort(content), '- [ ] 09:00 A\n\n- [ ] 10:00 B\n\n- [ ] 11:00 C\n')
+        self.assertEqual(self._sort(content), '- [ ] 09:00 A\n- [ ] 10:00 B\n- [ ] 11:00 C\n')
 
     def test_heading_before_tasks_preserved(self):
         content = '# Morning\n- [ ] 11:00 Late\n- [ ] 09:00 Early\n'
-        self.assertEqual(self._sort(content), '# Morning\n\n- [ ] 09:00 Early\n\n- [ ] 11:00 Late\n')
+        self.assertEqual(self._sort(content), '# Morning\n- [ ] 09:00 Early\n- [ ] 11:00 Late\n')
 
     def test_untimed_task_between_timed_stays_in_place(self):
         content = '- [ ] 11:00 C\n- [ ] No time\n- [ ] 09:00 A\n'
-        result = self._sort(content)
-        self.assertEqual(result, '- [ ] 09:00 A\n\n- [ ] No time\n\n- [ ] 11:00 C\n')
+        self.assertEqual(self._sort(content), '- [ ] 09:00 A\n- [ ] No time\n- [ ] 11:00 C\n')
 
     def test_sort_by_minutes_not_lexicographic(self):
         content = '- [ ] 10:00 B\n- [ ] 9:45 A\n'
-        self.assertEqual(self._sort(content), '- [ ] 9:45 A\n\n- [ ] 10:00 B\n')
+        self.assertEqual(self._sort(content), '- [ ] 9:45 A\n- [ ] 10:00 B\n')
 
     def test_task_with_subtasks_sorted_as_block(self):
         content = (
@@ -232,7 +235,6 @@ class TestSortTimedTasks(unittest.TestCase):
         expected = (
             '- [ ] 09:00 A\n'
             '  - [ ] Sub-A\n'
-            '\n'
             '- [ ] 10:00 B\n'
             '  - [ ] Sub-B\n'
         )
@@ -250,7 +252,6 @@ class TestSortTimedTasks(unittest.TestCase):
             '- [ ] Parent A\n'
             '  - [ ] 09:00 Early\n'
             '  - [ ] 11:00 Late\n'
-            '\n'
             '- [ ] Parent B\n'
             '  - [ ] 08:00 First\n'
         )
