@@ -75,6 +75,17 @@ class TestRenderScale(unittest.TestCase):
                 self.assertEqual(buf.getvalue(), expected)
 
 
+class TestStepSizeSelection(unittest.TestCase):
+    def test_quarter_hour_step(self):
+        self.assertEqual(TimelineTool._step_size_for_width(480, 80), 0.25)
+
+    def test_half_hour_step(self):
+        self.assertEqual(TimelineTool._step_size_for_width(480, 50), 0.5)
+
+    def test_one_hour_step(self):
+        self.assertEqual(TimelineTool._step_size_for_width(480, 20), 1.0)
+
+
 @pytest.mark.integration
 class TestIntegration(unittest.TestCase):
     EXPECTED_OUTPUT = (
@@ -103,3 +114,55 @@ class TestIntegration(unittest.TestCase):
         with redirect_stdout(buf):
             TimelineTool.render_timeline([], FIXTURE_DATE)
         self.assertIn('No timed tasks found', buf.getvalue())
+
+
+@pytest.mark.integration
+class TestIntegrationHalfHourStep(unittest.TestCase):
+    """width=50 forces step=0.5 (30-minute slots); verifies scale and bar alignment."""
+
+    EXPECTED_OUTPUT = (
+        "  9     12    15    18    21    24\n"
+        "──┼─────┼─────┼─────┼─────┼─────┤\n"
+        "██ ✓ 8:00-9:00 Morning routine\n"
+        "  ███ ○ 9:00-10:30 Work on project\n"
+        "     █ ✓ 10:30-11:00 Coffee break\n"
+        "      ██ ○ 11:00-12:00 Team meeting\n"
+        "            █ ○ 14:00 Review PRs\n"
+    )
+
+    def setUp(self):
+        tasks = TaskParser.parse_file(FIXTURE)
+        buf = io.StringIO()
+        with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 50})()):
+            with redirect_stdout(buf):
+                TimelineTool.render_timeline(tasks, FIXTURE_DATE)
+        self.output = strip_ansi(buf.getvalue())
+
+    def test_complete_output(self):
+        self.assertEqual(self.output, self.EXPECTED_OUTPUT)
+
+
+@pytest.mark.integration
+class TestIntegrationHourStep(unittest.TestCase):
+    """width=20 forces step=1.0 (hourly slots); verifies scale and bar alignment."""
+
+    EXPECTED_OUTPUT = (
+        "    12    18    24\n"
+        "────┼─────┼─────┤\n"
+        "█ ✓ 8:00-9:00 Morning routine\n"
+        " ██ ○ 9:00-10:30 Work on project\n"
+        "  █ ✓ 10:30-11:00 Coffee break\n"
+        "   █ ○ 11:00-12:00 Team meeting\n"
+        "      █ ○ 14:00 Review PRs\n"
+    )
+
+    def setUp(self):
+        tasks = TaskParser.parse_file(FIXTURE)
+        buf = io.StringIO()
+        with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 20})()):
+            with redirect_stdout(buf):
+                TimelineTool.render_timeline(tasks, FIXTURE_DATE)
+        self.output = strip_ansi(buf.getvalue())
+
+    def test_complete_output(self):
+        self.assertEqual(self.output, self.EXPECTED_OUTPUT)
