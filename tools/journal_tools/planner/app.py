@@ -2,6 +2,8 @@ import datetime
 
 from textual.app import App
 
+from .state import PlannerState
+
 
 class PlannerApp(App):
     def __init__(
@@ -14,13 +16,15 @@ class PlannerApp(App):
         self.directory = directory
         self.file_path = file_path
         self.initial_date = date
-        self.cache: dict = {}
+        self.planner = PlannerState(directory)
 
     async def on_mount(self) -> None:
         from .week_screen import WeekScreen
         from .day_screen import DayScreen
 
         if self.file_path:
-            await self.push_screen(DayScreen(self.directory, self.file_path, self.initial_date))
+            await self.push_screen(
+                DayScreen(self.planner, self.directory, self.file_path, self.initial_date)
+            )
         else:
-            await self.push_screen(WeekScreen(self.directory, self.cache))
+            await self.push_screen(WeekScreen(self.planner, self.directory))

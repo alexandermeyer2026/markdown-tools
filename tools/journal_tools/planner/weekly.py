@@ -23,6 +23,9 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
                 task_list=tl,
                 original_task_list=list(tl),
                 original_lines={t.line_number: t.to_line() for t in all_tasks},
+                original_bodies={
+                    t.line_number: t.body for t in all_tasks if t.line_number > 0
+                },
             )
         else:
             cache[key] = DayCache(
@@ -31,6 +34,7 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
                 task_list=[],
                 original_task_list=[],
                 original_lines={},
+                original_bodies={},
             )
     return cache[key]
 
@@ -48,9 +52,12 @@ def reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None
             task_list=tl,
             original_task_list=list(tl),
             original_lines={t.line_number: t.to_line() for t in all_tasks},
+            original_bodies={
+                t.line_number: t.body for t in all_tasks if t.line_number > 0
+            },
         )
     else:
-        cache[key] = DayCache(None, [], [], [], {})
+        cache[key] = DayCache(None, [], [], [], {}, {})
 
 
 def cache_has_changes(cache: dict) -> bool:

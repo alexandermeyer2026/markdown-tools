@@ -1,4 +1,5 @@
 import datetime
+import os
 
 from rich.console import Group
 from rich.text import Text
@@ -10,13 +11,11 @@ from textual.widget import Widget
 
 from models import Task, TaskTime
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
-from .state import WeekState
+from .state import PlannerState, WeekState
 from .utils import week_expanded, root_task
 from .weekly import (
     DAY_NAMES,
     cache_has_changes,
-    ensure_day_loaded,
-    reload_day_in_cache,
     save_cache,
     shift_task,
 )
@@ -56,10 +55,10 @@ class WeekGrid(Widget, can_focus=True):
     cursor_col: reactive[int] = reactive(0, repaint=True)
     cursor_row: reactive[int] = reactive(0, repaint=True)
 
-    def __init__(self, directory: str, cache: dict, week_offset: int = 0):
+    def __init__(self, planner: PlannerState, directory: str, week_offset: int = 0):
         super().__init__()
+        self._planner = planner
         self._directory = directory
-        self._cache = cache
         self._week_offset = week_offset
         self._state: WeekState | None = None
 
@@ -76,10 +75,8 @@ class WeekGrid(Widget, can_focus=True):
         )
         week_days = [monday + datetime.timedelta(days=i) for i in range(7)]
         for day in week_days:
-            ensure_day_loaded(self._cache, day, self._directory)
-        self._state = WeekState(
-            week_days=week_days, directory=self._directory, cache=self._cache
-        )
+            self._planner.load_day(day)
+        self._state = WeekState(week_days=week_days, planner=self._planner)
         self.refresh()
 
     # ── Rendering ─────────────────────────────────────────────────────────────
@@ -92,7 +89,7 @@ class WeekGrid(Widget, can_focus=True):
         today = datetime.date.today()
         col_width = max((self.size.width - 2) // 7, 10)
 
-        has_chg = cache_has_changes(self._cache)
+        has_chg = cache_has_changes(self._planner.days)
         marker = " *" if has_chg else ""
         monday, sunday = state.week_days[0], state.week_days[-1]
 
@@ -299,10 +296,9 @@ class WeekGrid(Widget, can_focus=True):
         if not unfinished:
             return
         task.children = [c for c in task.children if c.status in ("done", "failed", "started")]
-        day_key = self._state.week_days[self.cursor_col].isoformat()
-        self._state.cache[day_key].moved_subtasks.extend(unfinished)
+        self._state.day(self.cursor_col).moved_subtasks.extend(unfinished)
         tomorrow = self._state.week_days[self.cursor_col] + datetime.timedelta(days=1)
-        ensure_day_loaded(self._state.cache, tomorrow, self._directory)
+        self._planner.load_day(tomorrow)
         new_task = Task(
             title=task.title,
             status="todo",
@@ -313,7 +309,7 @@ class WeekGrid(Widget, can_focus=True):
         )
         for child in unfinished:
             child.parent = new_task
-        self._state.cache[tomorrow.isoformat()].task_list.append(new_task)
+        self._planner.days[tomorrow.isoformat()].task_list.append(new_task)
         self.refresh()
 
     def action_delete_task(self) -> None:
@@ -321,7 +317,7 @@ class WeekGrid(Widget, can_focus=True):
         if task is None:
             return
         day_key = self._selected_day().isoformat()
-        day_cache = self._cache[day_key]
+        day_cache = self._planner.days[day_key]
         if task.parent is None:
             day_cache.task_list.remove(task)
         else:
@@ -349,29 +345,30 @@ class WeekGrid(Widget, can_focus=True):
         assert self._state is not None
         day = self._selected_day()
         day_key = day.isoformat()
-        ensure_day_loaded(self._cache, day, self._directory)
+        self._planner.load_day(day)
 
         def push_day() -> None:
-            fp = self._cache[day_key].file_path
+            fp = self._planner.days[day_key].file_path
             if fp is None:
-                import os
                 fp = os.path.join(self._directory, day.strftime("%Y-%m-%d.md"))
                 open(fp, "w").close()
-                reload_day_in_cache(self._cache, day, self._directory)
-                fp = self._cache[day_key].file_path
+                self._planner.reload_day_by_key(day_key, new_file_path=fp)
+                fp = self._planner.days[day_key].file_path
 
             def on_day_closed(_result: object) -> None:
-                reload_day_in_cache(self._cache, day, self._directory)
+                self._planner.reload_day_by_key(day_key)
                 self.refresh()
 
-            self.app.push_screen(DayScreen(self._directory, fp, day), on_day_closed)
+            self.app.push_screen(
+                DayScreen(self._planner, self._directory, fp, day), on_day_closed
+            )
 
-        if cache_has_changes(self._cache):
+        if cache_has_changes(self._planner.days):
             from .save_dialog import SaveDialog
 
             def on_save(save_it: bool) -> None:
                 if save_it:
-                    save_cache(self._cache, self._directory)
+                    save_cache(self._planner.days, self._directory)
                 push_day()
 
             self.app.push_screen(SaveDialog(), on_save)
@@ -380,7 +377,6 @@ class WeekGrid(Widget, can_focus=True):
 
     def _edit_task(self, task: Task) -> None:
         from .task_form_screen import TaskFormScreen, TaskFormResult
-        from models import TaskTime
 
         def on_form_result(result: TaskFormResult | None) -> None:
             if result is None:
@@ -395,9 +391,6 @@ class WeekGrid(Widget, can_focus=True):
                 )
             else:
                 task.time = None
-            # Re-sort the day if time changed
-            day_key = self._selected_day().isoformat()
-            from .utils import week_expanded as _we
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(task), on_form_result)
@@ -408,7 +401,7 @@ class WeekGrid(Widget, can_focus=True):
 
         day = self._selected_day()
         day_key = day.isoformat()
-        ensure_day_loaded(self._cache, day, self._directory)
+        self._planner.load_day(day)
 
         def on_form_result(result: TaskFormResult | None) -> None:
             if result is None:
@@ -427,30 +420,30 @@ class WeekGrid(Widget, can_focus=True):
                 indent="",
                 body=result.body,
             )
-            self._cache[day_key].task_list.append(new_task)
+            self._planner.days[day_key].task_list.append(new_task)
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(), on_form_result)
 
     def action_save(self) -> None:
-        if not cache_has_changes(self._cache):
+        if not cache_has_changes(self._planner.days):
             return
         from .save_dialog import SaveDialog
 
         def on_confirm(save_it: bool) -> None:
             if save_it:
-                save_cache(self._cache, self._directory)
+                save_cache(self._planner.days, self._directory)
                 self.refresh()
 
         self.app.push_screen(SaveDialog(), on_confirm)
 
     def action_quit(self) -> None:
-        if cache_has_changes(self._cache):
+        if cache_has_changes(self._planner.days):
             from .save_dialog import SaveDialog
 
             def on_save(save: bool) -> None:
                 if save:
-                    save_cache(self._cache, self._directory)
+                    save_cache(self._planner.days, self._directory)
                 self.app.exit()
 
             self.app.push_screen(SaveDialog(), on_save)
@@ -459,13 +452,13 @@ class WeekGrid(Widget, can_focus=True):
 
 
 class WeekScreen(Screen):
-    def __init__(self, directory: str, cache: dict):
+    def __init__(self, planner: PlannerState, directory: str):
         super().__init__()
+        self._planner = planner
         self._directory = directory
-        self._cache = cache
 
     def compose(self) -> ComposeResult:
-        yield WeekGrid(self._directory, self._cache)
+        yield WeekGrid(self._planner, self._directory)
 
     def on_mount(self) -> None:
         self.query_one(WeekGrid).focus()

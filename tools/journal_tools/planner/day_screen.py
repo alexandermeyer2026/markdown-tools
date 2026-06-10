@@ -10,11 +10,11 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime, get_minutes, minutes_to_time
-from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_STYLES, get_time_slot, scale_lines,
 )
 from .daily import has_changes, save
+from .state import DayCache, PlannerState
 from .utils import flatten_tasks
 
 _STEP = 0.25          # hours per slot (15 min)
@@ -55,54 +55,63 @@ class DayGrid(Widget, can_focus=True):
 
     def __init__(
         self,
+        planner: PlannerState,
         directory: str,
         file_path: str,
         date: datetime.date | None,
     ):
         super().__init__()
+        self._planner = planner
         self._directory = directory
         self._file_path = file_path
         self._date = date
-        self._timed_tasks: list[Task] = []
-        self._untimed_tasks: list[Task] = []
-        self._new_tasks: list[Task] = []
-        self._deleted_tasks: list[Task] = []
-        self._original_lines: dict[int, str] = {}
-        self._original_bodies: dict[int, str | None] = {}
+        self._day_key: str | None = None
 
     def on_mount(self) -> None:
-        tasks = TaskParser.parse_file(self._file_path)
-        self._timed_tasks = sorted(
-            [t for t in tasks if t.time and t.parent is None],
+        self._day_key, _ = self._planner.load_file(self._file_path, self._date)
+
+    # ── State accessors ───────────────────────────────────────────────────────
+
+    def _day(self) -> DayCache:
+        assert self._day_key is not None
+        return self._planner.days[self._day_key]
+
+    @property
+    def _timed_tasks(self) -> list[Task]:
+        return sorted(
+            [t for t in self._day().task_list if t.time],
             key=lambda t: get_minutes(t.time.start),
         )
-        self._untimed_tasks = [t for t in tasks if not t.time and t.parent is None]
-        self._original_lines = {
-            t.line_number: t.to_line() for t in tasks if t.line_number > 0
-        }
-        self._original_bodies = {
-            t.line_number: t.body for t in tasks if t.line_number > 0
-        }
+
+    @property
+    def _untimed_tasks(self) -> list[Task]:
+        return [t for t in self._day().task_list if not t.time]
+
+    @property
+    def _new_tasks(self) -> list[Task]:
+        return [t for t in self._day().task_list if t.line_number == -1]
+
+    @property
+    def _deleted_tasks(self) -> list[Task]:
+        return list(self._day().deleted_tasks)
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
     def render(self) -> Group:
-        navigable = flatten_tasks(self._timed_tasks + self._untimed_tasks)
+        timed = self._timed_tasks
+        untimed = self._untimed_tasks
+        navigable = flatten_tasks(timed + untimed)
         selected = navigable[self.cursor_idx] if navigable else None
 
         rel_path = os.path.relpath(self._file_path, self._directory)
-        has_chg = has_changes(
-            self._timed_tasks, self._untimed_tasks, self._original_lines, self._new_tasks,
-            original_bodies=self._original_bodies,
-        )
-        marker = " *" if has_chg else ""
+        marker = " *" if self._has_changes() else ""
 
         lines: list[Text] = [
             Text.assemble(_MARGIN, (f"Planning: {rel_path}{marker}", "bold")),
             Text(""),
         ]
 
-        if self._timed_tasks:
+        if timed:
             now_slot = None
             if self._date and self._date == datetime.date.today():
                 now_m = datetime.datetime.now().hour * 60 + datetime.datetime.now().minute
@@ -118,7 +127,7 @@ class DayGrid(Widget, can_focus=True):
             lines.append(hours_text)
             lines.append(scale_text)
 
-            for task in self._timed_tasks:
+            for task in timed:
                 start_slot = get_time_slot(get_minutes(task.time.start), _STEP)
                 end_slot = start_slot
                 if task.time.end:
@@ -138,17 +147,17 @@ class DayGrid(Widget, can_focus=True):
         else:
             lines.append(Text.assemble(_MARGIN, ("No timed tasks yet", "bright_black")))
 
-        if self._untimed_tasks:
+        if untimed:
             lines.append(Text(""))
             lines.append(
                 Text.assemble(_MARGIN, ("── Unscheduled " + "─" * 50, "bright_black"))
             )
-            for task in self._untimed_tasks:
+            for task in untimed:
                 lines.append(self._untimed_task_row(task, selected))
                 lines.extend(self._body_rows(task))
                 lines.extend(self._subtask_rows(task, selected))
 
-        if not self._timed_tasks and not self._untimed_tasks:
+        if not timed and not untimed:
             lines.append(Text(""))
             lines.append(
                 Text.assemble(_MARGIN, ("No tasks. Press n to add one.", "bright_black"))
@@ -261,36 +270,28 @@ class DayGrid(Widget, can_focus=True):
         return None
 
     def _has_changes(self) -> bool:
+        day = self._day()
         return has_changes(
-            self._timed_tasks, self._untimed_tasks, self._original_lines,
-            self._new_tasks, self._deleted_tasks, self._original_bodies,
+            self._timed_tasks, self._untimed_tasks,
+            day.original_lines, self._new_tasks,
+            day.deleted_tasks, day.original_bodies,
         )
 
     def _do_save(self) -> None:
+        day = self._day()
         save(
-            self._file_path,
+            day.file_path,
             self._directory,
             self._timed_tasks,
             self._untimed_tasks,
-            self._original_lines,
+            day.original_lines,
             self._new_tasks,
-            self._deleted_tasks,
-            self._original_bodies,
+            day.deleted_tasks,
+            day.original_bodies,
         )
-        tasks = TaskParser.parse_file(self._file_path)
-        self._timed_tasks = sorted(
-            [t for t in tasks if t.time and t.parent is None],
-            key=lambda t: get_minutes(t.time.start),
-        )
-        self._untimed_tasks = [t for t in tasks if not t.time and t.parent is None]
-        self._original_lines = {
-            t.line_number: t.to_line() for t in tasks if t.line_number > 0
-        }
-        self._original_bodies = {
-            t.line_number: t.body for t in tasks if t.line_number > 0
-        }
-        self._new_tasks = []
-        self._deleted_tasks = []
+        self._planner.reload_day_by_key(self._day_key)
+        nav = self._navigable()
+        self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
@@ -308,11 +309,9 @@ class DayGrid(Widget, can_focus=True):
         task = self._selected()
         if task is None or task.parent is not None:
             return
+        day = self._day()
         if task.time is None:
             task.time = TaskTime(start="12:00")
-            self._untimed_tasks.remove(task)
-            self._timed_tasks.append(task)
-            self._timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
         else:
             start_m = get_minutes(task.time.start)
             if task.time.end:
@@ -326,7 +325,6 @@ class DayGrid(Widget, can_focus=True):
             else:
                 new_start = max(0, min(start_m + direction * _STEP_M, 23 * 60 + 45))
                 task.time = TaskTime(start=minutes_to_time(new_start))
-            self._timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
         nav = self._navigable()
         self.cursor_idx = next(
             (i for i, t in enumerate(nav) if t is task), self.cursor_idx
@@ -364,10 +362,8 @@ class DayGrid(Widget, can_focus=True):
         task = self._selected()
         if task is None or task.parent is not None:
             return
-        if task.time and task in self._timed_tasks:
+        if task.time:
             task.time = None
-            self._timed_tasks.remove(task)
-            self._untimed_tasks.insert(0, task)
             nav = self._navigable()
             self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
             self.refresh()
@@ -400,20 +396,12 @@ class DayGrid(Widget, can_focus=True):
             task.title = result.title
             task.status = result.status
             task.body = result.body
-            had_time = task.time is not None
             if result.time_start:
                 task.time = TaskTime(
                     start=result.time_start,
                     end=result.time_end if result.time_end else None,
                 )
-                if not had_time and task in self._untimed_tasks:
-                    self._untimed_tasks.remove(task)
-                    self._timed_tasks.append(task)
-                self._timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
             else:
-                if task.time and task in self._timed_tasks:
-                    self._timed_tasks.remove(task)
-                    self._untimed_tasks.insert(0, task)
                 task.time = None
             nav = self._navigable()
             self.cursor_idx = next(
@@ -444,12 +432,7 @@ class DayGrid(Widget, can_focus=True):
                 indent="",
                 body=result.body,
             )
-            if time:
-                self._timed_tasks.append(new_task)
-                self._timed_tasks.sort(key=lambda t: get_minutes(t.time.start))
-            else:
-                self._untimed_tasks.append(new_task)
-            self._new_tasks.append(new_task)
+            self._day().task_list.append(new_task)
             nav = self._navigable()
             self.cursor_idx = next(
                 (i for i, t in enumerate(nav) if t is new_task), len(nav) - 1
@@ -462,19 +445,15 @@ class DayGrid(Widget, can_focus=True):
         task = self._selected()
         if task is None:
             return
+        day = self._day()
         if task.parent is None:
-            if task in self._timed_tasks:
-                self._timed_tasks.remove(task)
-            else:
-                self._untimed_tasks.remove(task)
-            if task in self._new_tasks:
-                self._new_tasks.remove(task)
-            elif task.line_number > 0:
-                self._deleted_tasks.append(task)
+            day.task_list.remove(task)
+            if task.line_number > 0:
+                day.deleted_tasks.append(task)
         else:
             task.parent.children.remove(task)
             if task.line_number > 0:
-                self._deleted_tasks.append(task)
+                day.deleted_tasks.append(task)
         nav = self._navigable()
         self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
         self.refresh()
@@ -516,17 +495,19 @@ class DayGrid(Widget, can_focus=True):
 class DayScreen(Screen):
     def __init__(
         self,
+        planner: PlannerState,
         directory: str,
         file_path: str,
         date: datetime.date | None = None,
     ):
         super().__init__()
+        self._planner = planner
         self._directory = directory
         self._file_path = file_path
         self._date = date
 
     def compose(self) -> ComposeResult:
-        yield DayGrid(self._directory, self._file_path, self._date)
+        yield DayGrid(self._planner, self._directory, self._file_path, self._date)
 
     def on_mount(self) -> None:
         self.query_one(DayGrid).focus()
