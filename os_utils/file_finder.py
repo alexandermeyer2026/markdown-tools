@@ -20,20 +20,13 @@ class FileFinder:
                 if re.search(FileFinder.JOURNAL_FILE_PATTERN, file):
                     file_paths.append(os.path.join(root, file))
 
+        dated = [(f, FileFinder.get_journal_file_date(f)) for f in file_paths]
         if date_from:
-            file_paths = [
-                f for f in file_paths
-                if FileFinder.get_journal_file_date(f) >= date_from
-            ]
+            dated = [(f, d) for f, d in dated if d >= date_from]
         if date_to:
-            file_paths = [
-                f for f in file_paths
-                if FileFinder.get_journal_file_date(f) <= date_to
-            ]
-
-        file_paths.sort(key=lambda x: FileFinder.get_journal_file_date(x))
-
-        return file_paths
+            dated = [(f, d) for f, d in dated if d <= date_to]
+        dated.sort(key=lambda x: x[1])
+        return [f for f, _ in dated]
 
 
     @staticmethod
