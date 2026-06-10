@@ -14,6 +14,7 @@ from models import Task, TaskTime, minutes_to_time
 from os_utils import FileFinder, resolve_date
 from tools.journal_tools.planner import WeekState, DayCache
 from tools.journal_tools.planner.app import PlannerApp
+from tools.journal_tools.planner.state import PlannerState
 from tools.journal_tools.planner.daily import save as planner_save, has_changes as planner_has_changes
 from tools.journal_tools.planner.day_screen import DayGrid
 from tools.journal_tools.planner.save_dialog import SaveDialog
@@ -302,6 +303,66 @@ class TestWeekCacheChanges(unittest.TestCase):
         self.assertTrue(cache_has_changes(cache))
 
 
+class TestPlannerState(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.date = datetime.date(2024, 3, 15)
+        self.path = os.path.join(self.tmpdir, '2024-03-15.md')
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Some notes\n- [x] Task B\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_load_day_parses_tasks(self):
+        state = PlannerState(self.tmpdir)
+        day = state.load_day(self.date)
+        self.assertEqual(len(day.task_list), 2)
+        self.assertEqual(day.task_list[0].title, 'Task A')
+        self.assertEqual(day.task_list[1].title, 'Task B')
+
+    def test_load_day_is_idempotent(self):
+        state = PlannerState(self.tmpdir)
+        day1 = state.load_day(self.date)
+        day2 = state.load_day(self.date)
+        self.assertIs(day1, day2)
+
+    def test_load_day_missing_file_returns_empty(self):
+        state = PlannerState(self.tmpdir)
+        day = state.load_day(datetime.date(2024, 3, 16))
+        self.assertEqual(day.task_list, [])
+        self.assertIsNone(day.file_path)
+
+    def test_original_bodies_populated_on_load(self):
+        state = PlannerState(self.tmpdir)
+        day = state.load_day(self.date)
+        task_a = day.task_list[0]
+        self.assertIn(task_a.line_number, day.original_bodies)
+        self.assertIn('Some notes', day.original_bodies[task_a.line_number])
+
+    def test_reload_discards_in_memory_mutations(self):
+        state = PlannerState(self.tmpdir)
+        key = self.date.isoformat()
+        state.load_day(self.date)
+        new = Task(title='Ephemeral', status='todo', time=None, line_number=-1, indent='')
+        state.days[key].task_list.append(new)
+        self.assertEqual(len(state.days[key].task_list), 3)
+        state.reload_day_by_key(key)
+        self.assertEqual(len(state.days[key].task_list), 2)
+        self.assertNotIn('Ephemeral', [t.title for t in state.days[key].task_list])
+
+    def test_reload_refreshes_original_lines(self):
+        state = PlannerState(self.tmpdir)
+        key = self.date.isoformat()
+        state.load_day(self.date)
+        count_before = len(state.days[key].original_lines)
+        with open(self.path, 'a', encoding='utf-8') as f:
+            f.write("- [ ] Task C\n")
+        state.reload_day_by_key(key)
+        self.assertGreater(len(state.days[key].original_lines), count_before)
+
+
 class TestTaskToLines(unittest.TestCase):
     def test_simple_todo(self):
         task = Task(title='Buy milk', status='todo', time=None, line_number=1, indent='')
@@ -441,6 +502,14 @@ class PlannerIntegrationTest(unittest.TestCase):
 
     def test_week_delete_then_status_change(self):
         self._run_fixture('week_delete_then_status_change')
+
+    def test_week_new_task(self):
+        # New task added via 'n' in week view is written to disk on save
+        self._run_fixture('week_new_task')
+
+    def test_week_status_change_saved(self):
+        # Status change made in week view is written to disk on save
+        self._run_fixture('week_status_change_saved')
 
 
 class TestDayGridInteraction(unittest.TestCase):
@@ -725,6 +794,32 @@ class TestDayGridInteraction(unittest.TestCase):
         self.assertNotIn('Old notes', content)
         self.assertIn('Task A', content)
         self.assertIn('Buy milk', content)
+
+    def test_edit_task_title_persisted_after_save(self):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Original title\n- [ ] Task B\n")
+
+        async def run():
+            from textual.widgets import Input
+            app = PlannerApp(self.directory, file_path=self.path)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press('enter')
+                await pilot.pause()
+                app.screen.query_one('#title', Input).value = 'Updated title'
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes')
+                    await pilot.pause()
+
+        asyncio.run(run())
+        content = self._read()
+        self.assertIn('Updated title', content)
+        self.assertNotIn('Original title', content)
+        self.assertIn('Task B', content)
 
     def test_edit_task_body_marks_dirty(self):
         with open(self.path, 'w', encoding='utf-8') as f:
