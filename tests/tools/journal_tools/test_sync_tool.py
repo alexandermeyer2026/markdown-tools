@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from tools.journal_tools.sync_tool import (
-    _resolve_date,
     _cmd_push,
     _cmd_pull,
     _cmd_login,
@@ -18,24 +17,6 @@ FAKE_CONFIG = {'url': 'https://journal.example.com', 'token': 'fake-token'}
 
 def _mock_response(status: int, body: bytes):
     return (status, body)
-
-
-class TestResolveDate(unittest.TestCase):
-    def test_today(self):
-        self.assertEqual(_resolve_date('today'), datetime.date.today())
-
-    def test_tomorrow(self):
-        self.assertEqual(_resolve_date('tomorrow'), datetime.date.today() + datetime.timedelta(days=1))
-
-    def test_yesterday(self):
-        self.assertEqual(_resolve_date('yesterday'), datetime.date.today() - datetime.timedelta(days=1))
-
-    def test_explicit_date(self):
-        self.assertEqual(_resolve_date('2025-01-15'), datetime.date(2025, 1, 15))
-
-    def test_invalid_date_exits(self):
-        with self.assertRaises(SystemExit):
-            _resolve_date('not-a-date')
 
 
 class TestLogin(unittest.TestCase):

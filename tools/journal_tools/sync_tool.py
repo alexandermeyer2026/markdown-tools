@@ -22,14 +22,6 @@ def _save_config(config: dict) -> None:
     _CONFIG_PATH.chmod(0o600)
 
 
-def _resolve_date(date_string: str) -> datetime.date:
-    date = resolve_date(date_string)
-    if date is None:
-        print(f"Invalid date: {date_string}. Use today/yesterday/tomorrow or YYYY-MM-DD.")
-        sys.exit(1)
-    return date
-
-
 def _request(method: str, url: str, token: str, body: bytes = None, content_type: str = None):
     headers = {'Authorization': f'Bearer {token}'}
     if content_type:
@@ -72,7 +64,10 @@ def _cmd_push(args: list[str], journal_dir: str) -> None:
         sys.exit(1)
 
     config = _load_config()
-    date = _resolve_date(args[0])
+    date = resolve_date(args[0])
+    if date is None:
+        print(f"Invalid date: {args[0]}. Use today/yesterday/tomorrow or YYYY-MM-DD.")
+        sys.exit(1)
     path = Path(journal_dir) / f'{date}.md'
 
     if not path.exists():
@@ -111,7 +106,10 @@ def _cmd_pull(args: list[str], journal_dir: str) -> None:
         sys.exit(1)
 
     config = _load_config()
-    date = _resolve_date(args[0])
+    date = resolve_date(args[0])
+    if date is None:
+        print(f"Invalid date: {args[0]}. Use today/yesterday/tomorrow or YYYY-MM-DD.")
+        sys.exit(1)
 
     status, data = _request(
         'GET',
