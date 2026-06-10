@@ -2,7 +2,7 @@ import datetime
 import os
 
 from models import Task, top_level_tasks, get_minutes
-from os_utils import BackupManager, FileFinder, FileWriter
+from os_utils import BackupManager, FileFinder, FileWriter, task_block_end
 from parser import TaskParser
 from .state import DayCache, WeekState
 from .utils import flatten_tasks, task_to_lines, root_task, week_expanded
@@ -65,23 +65,6 @@ def cache_has_changes(cache: dict) -> bool:
             if task.line_number > 0 and day.original_lines.get(task.line_number) != task.to_line():
                 return True
     return False
-
-
-def _task_block(task, sorted_all: list, lines: list) -> tuple[int, int]:
-    """Return the 0-based (start, end) line range of task's block in lines."""
-    indent_len = len(task.indent)
-    next_boundary = None
-    found = False
-    for t in sorted_all:
-        if found:
-            if len(t.indent) <= indent_len:
-                next_boundary = t.line_number
-                break
-        elif t.line_number == task.line_number:
-            found = True
-    start = task.line_number - 1
-    end = (next_boundary - 1) if next_boundary is not None else len(lines)
-    return start, end
 
 
 def _refresh_line_numbers(cache: dict, backed_up: set) -> None:
@@ -229,7 +212,8 @@ def save_cache(cache: dict, directory: str) -> None:
         rs = remove_set.setdefault(day.file_path, set())
 
         for task, dst_key in departed:
-            start, end = _task_block(task, sorted_all, lines)
+            start = task.line_number - 1
+            end = task_block_end(task, sorted_all, len(lines))
             block = lines[start:end]
             rs.update(range(start + 1, end + 1))  # 1-based
 

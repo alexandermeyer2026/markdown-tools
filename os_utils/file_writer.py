@@ -3,29 +3,31 @@ import os
 from models import Task, get_minutes
 
 
+def task_block_end(task: Task, sorted_tasks: list, total_lines: int) -> int:
+    """Return the 0-based exclusive end index of task's block in a file."""
+    task_indent = len(task.indent)
+    found = False
+    for t in sorted_tasks:
+        if found:
+            if len(t.indent) <= task_indent:
+                return t.line_number - 1
+        elif t.line_number == task.line_number:
+            found = True
+    return total_lines
+
+
 class FileWriter:
 
     @staticmethod
     def cut_task(file_path: str, task: Task, all_tasks: list[Task]) -> list[str]:
         """Remove task's block from file and return the removed lines (with newlines)."""
         sorted_tasks = sorted(all_tasks, key=lambda t: t.line_number)
-        task_indent_len = len(task.indent)
-
-        next_boundary = None
-        found = False
-        for t in sorted_tasks:
-            if found:
-                if len(t.indent) <= task_indent_len:
-                    next_boundary = t.line_number
-                    break
-            elif t.line_number == task.line_number:
-                found = True
 
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        start = task.line_number - 1  # convert to 0-based
-        end = (next_boundary - 1) if next_boundary is not None else len(lines)
+        start = task.line_number - 1
+        end = task_block_end(task, sorted_tasks, len(lines))
 
         block = lines[start:end]
         remaining = lines[:start] + lines[end:]
@@ -66,18 +68,8 @@ class FileWriter:
             lines = f.readlines()
 
         def block_range(task: Task) -> tuple[int, int]:
-            indent_len = len(task.indent)
-            next_boundary = None
-            found = False
-            for t in all_sorted:
-                if found:
-                    if len(t.indent) <= indent_len:
-                        next_boundary = t.line_number
-                        break
-                elif t.line_number == task.line_number:
-                    found = True
             start = task.line_number - 1
-            end = (next_boundary - 1) if next_boundary is not None else len(lines)
+            end = task_block_end(task, all_sorted, len(lines))
             while end > start and lines[end - 1].strip() == '':
                 end -= 1
             return start, end
