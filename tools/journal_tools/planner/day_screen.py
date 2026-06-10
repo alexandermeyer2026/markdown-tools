@@ -180,12 +180,10 @@ class DayGrid(Widget, can_focus=True):
         icon_col = offset + bar_width + len(task.time.to_str()) + 2
         title_max = max(self.size.width - icon_col - 4, 0)
 
-        t = Text(_MARGIN)
         if is_sel:
-            t.append(" " * max(offset - 2, 0))
-            t.append("> ")
+            t = Text(" " * offset + "> ")
         else:
-            t.append(" " * offset)
+            t = Text(_MARGIN + " " * offset)
         t.append("█" * bar_width, style=style)
         t.append(f" {task.time.to_str()} ")
         t.append(icon, style=style)
