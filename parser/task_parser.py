@@ -84,6 +84,8 @@ class TaskParser:
 
                     if not content.strip():
                         owner = stack[-1]
+                        if owner.body is None:
+                            continue
                     else:
                         indent_match = re.match(r'^(\s*)', content)
                         line_indent = indent_match.group(1) if indent_match else ''
