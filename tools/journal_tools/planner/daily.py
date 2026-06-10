@@ -1,6 +1,6 @@
 from os_utils import BackupManager, FileWriter
 from parser import TaskParser
-from .utils import flatten_tasks
+from .utils import flatten_tasks, task_body_lines, task_to_lines
 
 
 def has_changes(timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None, original_bodies=None) -> bool:
@@ -38,16 +38,6 @@ def _deleted_line_numbers(deleted_tasks, original_lines) -> set:
     return to_remove
 
 
-def _body_lines(task) -> list[str]:
-    if not task.body:
-        return []
-    body_indent = (task.indent or '') + '    '
-    result = []
-    for line in task.body.split('\n'):
-        stripped = line.strip()
-        result.append(body_indent + stripped + '\n' if stripped else '\n')
-    return result
-
 
 def save(file_path, directory, timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None, original_bodies=None):
     BackupManager.backup(file_path, directory)
@@ -70,7 +60,7 @@ def save(file_path, directory, timed_tasks, untimed_tasks, original_lines, new_t
             if task.line_number > 0 and task.line_number in original_bodies:
                 if original_bodies[task.line_number] != task.body:
                     body_remove.update(task.body_line_numbers)
-                    body_insert[task.line_number] = _body_lines(task)
+                    body_insert[task.line_number] = task_body_lines(task)
 
     delete_remove: set[int] = (
         _deleted_line_numbers(deleted_tasks, original_lines) if deleted_tasks else set()
@@ -93,8 +83,7 @@ def save(file_path, directory, timed_tasks, untimed_tasks, original_lines, new_t
     for task in new_tasks:
         if lines and lines[-1] != '\n':
             lines.append('\n')
-        lines.append(task.to_line() + '\n')
-        lines.extend(_body_lines(task))
+        lines.extend(task_to_lines(task))
 
     FileWriter.write_atomic(file_path, lines)
 

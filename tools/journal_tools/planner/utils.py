@@ -9,13 +9,20 @@ def flatten_tasks(tasks: list) -> list:
     return result
 
 
+def task_body_lines(task: Task) -> list[str]:
+    if not task.body:
+        return []
+    body_indent = (task.indent or '') + '    '
+    result = []
+    for line in task.body.split('\n'):
+        stripped = line.strip()
+        result.append(body_indent + stripped + '\n' if stripped else '\n')
+    return result
+
+
 def task_to_lines(task: Task) -> list[str]:
     lines = [task.to_line() + '\n']
-    if task.body:
-        body_indent = (task.indent or '') + '    '
-        for line in task.body.split('\n'):
-            stripped = line.strip()
-            lines.append(body_indent + stripped + '\n' if stripped else '\n')
+    lines.extend(task_body_lines(task))
     for child in task.children:
         lines.extend(task_to_lines(child))
     return lines
