@@ -5,9 +5,10 @@ import shutil
 from models import Task
 from os_utils import FileFinder, resolve_date
 from parser import TaskParser
+from models import get_minutes
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,
-    get_minutes, get_time_slot, scale_lines, body_rows, subtask_rows,
+    get_time_slot, scale_lines, body_rows, subtask_rows,
     insert_now_marker,
 )
 
