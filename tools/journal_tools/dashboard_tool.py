@@ -26,7 +26,7 @@ CLOCK_DIGITS = {
 }
 
 
-class UpdateTool:
+class DashboardTool:
 
     OVERDUE_DAYS  = 14
     UPCOMING_DAYS = 7
@@ -36,13 +36,13 @@ class UpdateTool:
         today = datetime.date.today()
         now   = datetime.datetime.now()
 
-        overdue_by_date  = UpdateTool._gather(directory,
-                               today - datetime.timedelta(days=UpdateTool.OVERDUE_DAYS),
+        overdue_by_date  = DashboardTool._gather(directory,
+                               today - datetime.timedelta(days=DashboardTool.OVERDUE_DAYS),
                                today - datetime.timedelta(days=1))
-        today_tasks      = UpdateTool._tasks_for_date(directory, today)
-        upcoming_by_date = UpdateTool._gather(directory,
+        today_tasks      = DashboardTool._tasks_for_date(directory, today)
+        upcoming_by_date = DashboardTool._gather(directory,
                                today + datetime.timedelta(days=1),
-                               today + datetime.timedelta(days=UpdateTool.UPCOMING_DAYS))
+                               today + datetime.timedelta(days=DashboardTool.UPCOMING_DAYS))
 
         overdue = []
         for d, tasks in sorted(overdue_by_date.items()):
@@ -57,8 +57,8 @@ class UpdateTool:
         }
 
         blocks = []
-        blocks.append(UpdateTool._header_and_calendar(today, now))
-        blocks.append(UpdateTool._three_columns(today, now, overdue, today_tasks, upcoming))
+        blocks.append(DashboardTool._header_and_calendar(today, now))
+        blocks.append(DashboardTool._three_columns(today, now, overdue, today_tasks, upcoming))
 
         print('\n\n'.join('\n'.join(b) for b in blocks))
 
@@ -131,7 +131,7 @@ class UpdateTool:
 
     @staticmethod
     def _header_and_calendar(today, now):
-        cols = UpdateTool._cols()
+        cols = DashboardTool._cols()
 
         day_name = today.strftime('%A')
         date_str = today.strftime('%-d %B %Y')
@@ -141,17 +141,17 @@ class UpdateTool:
         header_pad = ' ' * max(0, (cols - len(header_vis)) // 2)
         header     = f"{header_pad}{BOLD}{day_name}, {date_str}{RESET}  {GRAY}·  Week {week_num}{RESET}"
 
-        clock_lines = UpdateTool._big_clock_lines(now)
-        cal_lines   = UpdateTool._calendar_lines(today)
+        clock_lines = DashboardTool._big_clock_lines(now)
+        cal_lines   = DashboardTool._calendar_lines(today)
 
         gap    = '   '
         n      = len(cal_lines)
         pad_r  = max(0, (n - 5) // 2)
-        empty  = ' ' * UpdateTool._CLOCK_VISUAL_W
+        empty  = ' ' * DashboardTool._CLOCK_VISUAL_W
 
         clock_padded = [empty] * pad_r + clock_lines + [empty] * (n - pad_r - 5)
 
-        block_w   = UpdateTool._CLOCK_VISUAL_W + len(gap) + 29  # clock + gap + calendar
+        block_w   = DashboardTool._CLOCK_VISUAL_W + len(gap) + 29  # clock + gap + calendar
         block_pad = ' ' * max(0, (cols - block_w) // 2)
 
         result = [header]
@@ -166,7 +166,7 @@ class UpdateTool:
         n     = len(overdue)
         label = f"Overdue{'  ·  ' + str(n) if n else ''}"
         pad   = lambda s: ansi_truncate_pad(s, col_w)
-        lines = [pad(UpdateTool._col_divider(label, col_w))]
+        lines = [pad(DashboardTool._col_divider(label, col_w))]
         if not overdue:
             lines.append(pad(f"  {GRAY}–{RESET}"))
         else:
@@ -177,7 +177,7 @@ class UpdateTool:
                 ))
                 for bline in body_rows(task, left_pad=2):
                     lines.append(pad(bline))
-                lines.extend(UpdateTool._subtask_lines(task, pad))
+                lines.extend(DashboardTool._subtask_lines(task, pad))
         return lines
 
     @staticmethod
@@ -199,7 +199,7 @@ class UpdateTool:
             summary.append(f"next in {f'{h}h {m}m' if h else f'{m}m'}")
 
         pad   = lambda s: ansi_truncate_pad(s, col_w)
-        lines = [pad(UpdateTool._col_divider('Today  ·  ' + '  ·  '.join(summary), col_w))]
+        lines = [pad(DashboardTool._col_divider('Today  ·  ' + '  ·  '.join(summary), col_w))]
 
         if not timed and not untimed:
             lines.append(pad(f"  {GRAY}No tasks today{RESET}"))
@@ -217,7 +217,7 @@ class UpdateTool:
             lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
             for bline in body_rows(task, left_pad=2):
                 lines.append(pad(bline))
-            lines.extend(UpdateTool._subtask_lines(task, pad))
+            lines.extend(DashboardTool._subtask_lines(task, pad))
 
         return lines
 
@@ -230,13 +230,13 @@ class UpdateTool:
             lines.append(pad(f"{indent}{GRAY}{cicon} {child.title}{RESET}"))
             for bline in body_rows(child, left_pad=0, depth=depth + 2):
                 lines.append(pad(bline))
-            lines.extend(UpdateTool._subtask_lines(child, pad, depth + 1))
+            lines.extend(DashboardTool._subtask_lines(child, pad, depth + 1))
         return lines
 
     @staticmethod
     def _col_upcoming(today, upcoming_by_date, col_w):
         pad   = lambda s: ansi_truncate_pad(s, col_w)
-        lines = [pad(UpdateTool._col_divider('Upcoming', col_w))]
+        lines = [pad(DashboardTool._col_divider('Upcoming', col_w))]
         if not upcoming_by_date:
             lines.append(pad(f"  {GRAY}–{RESET}"))
             return lines
@@ -261,24 +261,24 @@ class UpdateTool:
                     lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
                     for bline in body_rows(task, left_pad=2):
                         lines.append(pad(bline))
-                    lines.extend(UpdateTool._subtask_lines(task, pad))
+                    lines.extend(DashboardTool._subtask_lines(task, pad))
             for task in untimed:
                 icon  = STATUS_ICONS.get(task.status, '○')
                 color = STATUS_COLORS.get(task.status, GRAY)
                 lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
                 for bline in body_rows(task, left_pad=2):
                     lines.append(pad(bline))
-                lines.extend(UpdateTool._subtask_lines(task, pad))
+                lines.extend(DashboardTool._subtask_lines(task, pad))
         return lines
 
     @staticmethod
     def _three_columns(today, now, overdue, today_tasks, upcoming_by_date):
         sep   = '  │  '
-        col_w = max(10, (UpdateTool._cols() - len(sep) * 2) // 3)
+        col_w = max(10, (DashboardTool._cols() - len(sep) * 2) // 3)
 
-        c1 = UpdateTool._col_overdue(overdue, col_w)
-        c2 = UpdateTool._col_today(today, now, today_tasks, col_w)
-        c3 = UpdateTool._col_upcoming(today, upcoming_by_date, col_w)
+        c1 = DashboardTool._col_overdue(overdue, col_w)
+        c2 = DashboardTool._col_today(today, now, today_tasks, col_w)
+        c3 = DashboardTool._col_upcoming(today, upcoming_by_date, col_w)
 
         height = max(len(c1), len(c2), len(c3))
         empty  = ' ' * col_w

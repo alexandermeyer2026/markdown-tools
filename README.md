@@ -46,7 +46,7 @@ poetry run python3 main.py journal today
 poetry run python3 main.py journal timeline [file]
 poetry run python3 main.py journal catch-up
 poetry run python3 main.py journal planner
-poetry run python3 main.py journal update
+poetry run python3 main.py journal dashboard
 ```
 
 Set the journal directory via the `JOURNAL_DIR` environment variable:
@@ -80,7 +80,7 @@ Tools are designed to work independently:
 | `journal timeline <file>` | Visual timeline of a day's tasks |
 | `journal catch-up` | Step through past journal files with unresolved tasks |
 | `journal planner` | Interactive planner for scheduling tasks |
-| `journal update` | Dashboard overview of open and upcoming tasks |
+| `journal dashboard` | Dashboard overview of open and upcoming tasks |
 | `journal time-machine <file>` | Browse and restore previous versions of a file |
 | `journal sync` | Push and pull files to a self-hosted server |
 
@@ -94,7 +94,7 @@ markdown-tools/
 ├── parser/                 # Markdown parsing utilities
 ├── os_utils/               # File system utilities
 ├── tools/                  # Tool implementations
-│   └── journal_tools/      # Journal tools (timeline, catch-up, planner, update)
+│   └── journal_tools/      # Journal tools (timeline, catch-up, planner, dashboard)
 └── webapp/                 # Optional self-hosted web interface
     ├── backend/            # FastAPI backend
     ├── frontend/           # React frontend
