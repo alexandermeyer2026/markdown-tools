@@ -7,7 +7,7 @@ from os_utils import FileFinder
 from parser import TaskParser
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
-    ansi_truncate_pad, body_rows, get_minutes,
+    ansi_truncate_pad, body_rows, subtask_rows, get_minutes,
 )
 from tools.journal_tools.timeline_tool import TimelineTool
 
@@ -177,7 +177,7 @@ class DashboardTool:
                 ))
                 for bline in body_rows(task, left_pad=2):
                     lines.append(pad(bline))
-                lines.extend(DashboardTool._subtask_lines(task, pad))
+                lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
         return lines
 
     @staticmethod
@@ -222,18 +222,6 @@ class DashboardTool:
         return lines
 
     @staticmethod
-    def _subtask_lines(task, pad, depth=1):
-        lines = []
-        for child in task.children:
-            cicon  = STATUS_ICONS.get(child.status, '○')
-            indent = '  ' * (depth + 2)
-            lines.append(pad(f"{indent}{GRAY}{cicon} {child.title}{RESET}"))
-            for bline in body_rows(child, left_pad=0, depth=depth + 2):
-                lines.append(pad(bline))
-            lines.extend(DashboardTool._subtask_lines(child, pad, depth + 1))
-        return lines
-
-    @staticmethod
     def _col_upcoming(today, upcoming_by_date, col_w):
         pad   = lambda s: ansi_truncate_pad(s, col_w)
         lines = [pad(DashboardTool._col_divider('Upcoming', col_w))]
@@ -261,14 +249,14 @@ class DashboardTool:
                     lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
                     for bline in body_rows(task, left_pad=2):
                         lines.append(pad(bline))
-                    lines.extend(DashboardTool._subtask_lines(task, pad))
+                    lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
             for task in untimed:
                 icon  = STATUS_ICONS.get(task.status, '○')
                 color = STATUS_COLORS.get(task.status, GRAY)
                 lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
                 for bline in body_rows(task, left_pad=2):
                     lines.append(pad(bline))
-                lines.extend(DashboardTool._subtask_lines(task, pad))
+                lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
         return lines
 
     @staticmethod
