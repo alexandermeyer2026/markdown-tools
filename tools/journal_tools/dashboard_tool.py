@@ -217,7 +217,7 @@ class DashboardTool:
             lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
             for bline in body_rows(task, left_pad=2):
                 lines.append(pad(bline))
-            lines.extend(DashboardTool._subtask_lines(task, pad))
+            lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
 
         return lines
 
