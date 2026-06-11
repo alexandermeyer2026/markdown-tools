@@ -26,9 +26,13 @@ class SaveDialog(ModalScreen[bool]):
     }
     """
 
+    def __init__(self, message: str = "Save changes?") -> None:
+        super().__init__()
+        self._message = message
+
     def compose(self) -> ComposeResult:
         with Horizontal():
-            yield Label("Save changes?")
+            yield Label(self._message)
             yield Button("Yes", id="yes", variant="primary")
             yield Button("No", id="no", variant="default")
 

@@ -1,12 +1,15 @@
 from os_utils import BackupManager, FileWriter
 from parser import TaskParser
-from .utils import flatten_tasks, task_body_lines, task_to_lines
+from .utils import flatten_tasks, task_body_lines, task_to_lines, block_rewrite_tasks, _block_lines
 
 
 def has_changes(timed_tasks, untimed_tasks, original_lines, new_tasks, deleted_tasks=None, original_bodies=None) -> bool:
-    if new_tasks or deleted_tasks:
+    if deleted_tasks:
         return True
-    for task in flatten_tasks(timed_tasks + untimed_tasks):
+    all_tasks = flatten_tasks(timed_tasks + untimed_tasks)
+    if any(t.line_number == -1 for t in all_tasks):
+        return True
+    for task in all_tasks:
         if task.line_number > 0 and task.line_number in original_lines:
             if original_lines[task.line_number] != task.to_line():
                 return True
@@ -66,11 +69,20 @@ def save(file_path, directory, timed_tasks, untimed_tasks, original_lines, new_t
         _deleted_line_numbers(deleted_tasks, original_lines) if deleted_tasks else set()
     )
 
-    to_remove = body_remove | delete_remove
+    br_tasks = block_rewrite_tasks(all_tasks)
+    block_rewrites: dict[int, list[str]] = {t.line_number: task_to_lines(t) for t in br_tasks}
+    block_remove: set[int] = set()
+    for t in br_tasks:
+        block_remove.update(_block_lines(t) - {t.line_number})
 
-    if header_updates or to_remove or body_insert:
+    to_remove = body_remove | delete_remove | block_remove
+
+    if header_updates or to_remove or body_insert or block_rewrites:
         new_lines = []
         for i, line in enumerate(lines, 1):
+            if i in block_rewrites:
+                new_lines.extend(block_rewrites[i])
+                continue
             if i in header_updates:
                 line = header_updates[i]
             if i in to_remove:

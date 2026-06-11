@@ -15,7 +15,7 @@ from tools.journal_tools.rendering import (
 )
 from .daily import has_changes, save
 from .state import DayCache, PlannerState
-from .utils import flatten_tasks
+from .utils import flatten_tasks, fix_parent_refs
 
 _STEP = 0.25          # hours per slot (15 min)
 _STEP_M = int(_STEP * 60)
@@ -403,6 +403,7 @@ class DayGrid(Widget, can_focus=True):
                 )
             else:
                 task.time = None
+            fix_parent_refs(task.children, task)
             nav = self._navigable()
             self.cursor_idx = next(
                 (i for i, t in enumerate(nav) if t is task),
@@ -431,7 +432,9 @@ class DayGrid(Widget, can_focus=True):
                 line_number=-1,
                 indent="",
                 body=result.body,
+                children=result.subtasks,
             )
+            fix_parent_refs(new_task.children, new_task)
             self._day().task_list.append(new_task)
             nav = self._navigable()
             self.cursor_idx = next(

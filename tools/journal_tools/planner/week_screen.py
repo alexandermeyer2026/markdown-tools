@@ -12,7 +12,7 @@ from textual.widget import Widget
 from models import Task, TaskTime
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import PlannerState, WeekState
-from .utils import week_expanded, root_task
+from .utils import week_expanded, root_task, fix_parent_refs
 from .weekly import (
     DAY_NAMES,
     cache_has_changes,
@@ -391,6 +391,7 @@ class WeekGrid(Widget, can_focus=True):
                 )
             else:
                 task.time = None
+            fix_parent_refs(task.children, task)
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(task), on_form_result)
@@ -419,7 +420,9 @@ class WeekGrid(Widget, can_focus=True):
                 line_number=-1,
                 indent="",
                 body=result.body,
+                children=result.subtasks,
             )
+            fix_parent_refs(new_task.children, new_task)
             self._planner.days[day_key].task_list.append(new_task)
             self.refresh()
 

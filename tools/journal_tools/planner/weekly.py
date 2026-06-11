@@ -5,7 +5,7 @@ from models import Task, top_level_tasks, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter, task_block_end
 from parser import TaskParser
 from .state import DayCache, WeekState
-from .utils import flatten_tasks, task_to_lines, root_task, week_expanded
+from .utils import flatten_tasks, task_to_lines, root_task, week_expanded, block_rewrite_tasks, _block_lines
 
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -68,7 +68,9 @@ def cache_has_changes(cache: dict) -> bool:
         orig_ids = {id(t) for t in day.original_task_list}
         if current_ids != orig_ids:
             return True
-        for task in flatten_tasks(day.original_task_list):
+        for task in flatten_tasks(day.task_list):
+            if task.line_number == -1:
+                return True
             if task.line_number > 0 and day.original_lines.get(task.line_number) != task.to_line():
                 return True
     return False
@@ -123,8 +125,7 @@ def save_cache(cache: dict, directory: str) -> None:
     # Build reverse lookup: id(task) -> date key (where the task currently lives).
     task_location: dict = {id(t): key for key, day in cache.items() for t in day.task_list}
 
-    # Write status changes to each task's original file before cutting any tasks,
-    # so blocks that are about to move carry their updated status.
+    # Write status changes and block rewrites (new subtasks added to existing tasks).
     for key, day in cache.items():
         if not day.file_path:
             continue
@@ -133,17 +134,36 @@ def save_cache(cache: dict, directory: str) -> None:
             if t.line_number > 0
             and day.original_lines.get(t.line_number) != t.to_line()
         ]
-        if not status_changed:
+        br_tasks = block_rewrite_tasks(flatten_tasks(day.task_list))
+        if not status_changed and not br_tasks:
             continue
         if day.file_path not in backed_up:
             BackupManager.backup(day.file_path, directory)
             backed_up.add(day.file_path)
         with open(day.file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        for task in status_changed:
-            if 0 < task.line_number <= len(lines):
-                lines[task.line_number - 1] = task.to_line() + '\n'
-        FileWriter.write_atomic(day.file_path, lines)
+        if br_tasks:
+            rewrites = {t.line_number: task_to_lines(t) for t in br_tasks}
+            remove = set()
+            for t in br_tasks:
+                remove.update(_block_lines(t) - {t.line_number})
+            status_dict = {t.line_number: t.to_line() + '\n' for t in status_changed}
+            new_lines = []
+            for i, line in enumerate(lines, 1):
+                if i in rewrites:
+                    new_lines.extend(rewrites[i])
+                    continue
+                if i in remove:
+                    continue
+                if i in status_dict:
+                    line = status_dict[i]
+                new_lines.append(line)
+            FileWriter.write_atomic(day.file_path, new_lines)
+        else:
+            for task in status_changed:
+                if 0 < task.line_number <= len(lines):
+                    lines[task.line_number - 1] = task.to_line() + '\n'
+            FileWriter.write_atomic(day.file_path, lines)
 
     # Remove deleted tasks.
     for key, day in cache.items():
