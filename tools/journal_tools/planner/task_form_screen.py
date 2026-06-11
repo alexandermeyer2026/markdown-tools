@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Select, TextArea
 
+from config import get_indent_step
 from models import Task, TaskTime
 from tools.journal_tools.rendering import STATUS_ICONS
 from .utils import fix_parent_refs, flatten_tasks
@@ -114,7 +115,7 @@ class SubtaskList(Widget, can_focus=True):
                 status=result.status,
                 time=time,
                 line_number=-1,
-                indent=parent_indent + "  ",
+                indent=parent_indent + get_indent_step(),
                 body=result.body,
                 children=result.subtasks,
                 parent=self._source_task,
@@ -125,7 +126,7 @@ class SubtaskList(Widget, can_focus=True):
             self.cursor_idx = next(
                 (i for i, t in enumerate(flat) if t is new_task), len(flat) - 1
             )
-            self.refresh()
+            self.refresh(layout=True)
 
         self.app.push_screen(TaskFormScreen(), on_result)
 
@@ -164,7 +165,7 @@ class SubtaskList(Widget, can_focus=True):
             self._remove_from_tree(target, self._children)
             new_flat = self._flat()
             self.cursor_idx = min(self.cursor_idx, max(len(new_flat) - 1, 0))
-            self.refresh()
+            self.refresh(layout=True)
 
         from .save_dialog import SaveDialog
         self.app.push_screen(

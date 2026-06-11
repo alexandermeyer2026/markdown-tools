@@ -8,7 +8,7 @@ def fix_parent_refs(tasks: list[Task], parent: Task | None) -> None:
     for task in tasks:
         task.parent = parent
         if task.line_number == -1:
-            task.indent = parent_indent + "  "
+            task.indent = parent_indent + get_indent_step()
         fix_parent_refs(task.children, task)
 
 
