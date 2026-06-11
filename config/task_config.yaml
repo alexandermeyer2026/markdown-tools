@@ -1,5 +1,8 @@
 # Task parser patterns. Adjust to match your markdown style.
 
+# Number of spaces used for each indentation level of subtasks.
+indent_step: 4
+
 checkbox_pattern: '^\s*-\s\[(.)\]'
 time_pattern: '^(\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?)\s*:?\s*'
 
