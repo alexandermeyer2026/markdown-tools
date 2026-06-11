@@ -1,3 +1,4 @@
+from config import get_indent_step
 from models import Task, get_minutes
 
 
@@ -56,7 +57,7 @@ def flatten_tasks(tasks: list) -> list:
 def task_body_lines(task: Task) -> list[str]:
     if not task.body:
         return []
-    body_indent = (task.indent or '') + '    '
+    body_indent = (task.indent or '') + get_indent_step()
     result = []
     for line in task.body.split('\n'):
         stripped = line.strip()

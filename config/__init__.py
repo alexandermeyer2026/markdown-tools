@@ -27,3 +27,8 @@ def get_task_config() -> dict:
 
     _cached_config = data
     return _cached_config
+
+
+def get_indent_step() -> str:
+    """Return the whitespace string used for one level of task indentation."""
+    return ' ' * get_task_config().get('indent_step', 2)
