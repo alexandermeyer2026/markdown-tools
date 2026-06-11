@@ -61,7 +61,7 @@ class SubtaskList(Widget, can_focus=True):
     def render(self) -> Group | Text:
         flat = self._flat()
         if not flat:
-            return Text("  press n to add", style="bright_black")
+            return Text("  press n to add", style="dim")
         cursor_task = flat[min(self.cursor_idx, len(flat) - 1)]
         lines = self._render_children(self._children, depth=0, cursor_task=cursor_task)
         return Group(*lines)
@@ -74,18 +74,9 @@ class SubtaskList(Widget, can_focus=True):
             icon = STATUS_ICONS.get(task.status, "?")
             indent = "  " * depth
             is_sel = task is cursor_task and self.has_focus
-            t = Text()
+            t = Text(indent + icon + " " + task.title)
             if is_sel:
-                sel_indent = indent[:-2] if len(indent) >= 2 else ""
-                t.append(sel_indent)
-                t.append("> ")
-                t.append(icon)
-                t.append(" ")
-                t.append(task.title, style="reverse")
-            else:
-                t.append(indent)
-                t.append(icon, style="bright_black")
-                t.append(f" {task.title}", style="bright_black")
+                t.stylize("reverse")
             lines.append(t)
             lines.extend(self._render_children(task.children, depth + 1, cursor_task))
         return lines
