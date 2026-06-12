@@ -1,5 +1,6 @@
 import datetime
 import os
+import textwrap
 from dataclasses import dataclass, field
 
 from models import top_level_tasks
@@ -61,6 +62,9 @@ class PlannerState:
             all_tasks = TaskParser.parse_file(file_path)
         else:
             all_tasks = []
+        for t in all_tasks:
+            if t.body is not None:
+                t.body = textwrap.dedent(t.body).strip() or None
         tl = list(top_level_tasks(all_tasks))
         self._days[key] = DayCache(
             file_path=file_path,

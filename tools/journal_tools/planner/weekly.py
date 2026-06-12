@@ -1,11 +1,12 @@
 import datetime
 import os
+import textwrap
 
 from models import Task, top_level_tasks, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter, task_block_end
 from parser import TaskParser
 from .state import DayCache, WeekState
-from .utils import flatten_tasks, task_to_lines, root_task, week_expanded, block_rewrite_tasks, _block_lines
+from .utils import flatten_tasks, task_body_lines, task_to_lines, root_task, week_expanded, block_rewrite_tasks, _block_lines
 
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -16,6 +17,9 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
         files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
         if files:
             all_tasks = TaskParser.parse_file(files[0])
+            for t in all_tasks:
+                if t.body is not None:
+                    t.body = textwrap.dedent(t.body).strip() or None
             tl = list(top_level_tasks(all_tasks))
             cache[key] = DayCache(
                 file_path=files[0],
@@ -45,6 +49,9 @@ def reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None
     files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
     if files:
         all_tasks = TaskParser.parse_file(files[0])
+        for t in all_tasks:
+            if t.body is not None:
+                t.body = textwrap.dedent(t.body).strip() or None
         tl = list(top_level_tasks(all_tasks))
         cache[key] = DayCache(
             file_path=files[0],
@@ -71,7 +78,9 @@ def cache_has_changes(cache: dict) -> bool:
         for task in flatten_tasks(day.task_list):
             if task.line_number == -1:
                 return True
-            if task.line_number > 0 and day.original_lines.get(task.line_number) != task.to_line():
+            if task.line_number in day.original_lines and day.original_lines[task.line_number] != task.to_line():
+                return True
+            if task.line_number in day.original_bodies and day.original_bodies[task.line_number] != task.body:
                 return True
     return False
 
@@ -125,28 +134,44 @@ def save_cache(cache: dict, directory: str) -> None:
     # Build reverse lookup: id(task) -> date key (where the task currently lives).
     task_location: dict = {id(t): key for key, day in cache.items() for t in day.task_list}
 
-    # Write status changes and block rewrites (new subtasks added to existing tasks).
+    # Write status/body changes and block rewrites (new subtasks added to existing tasks).
     for key, day in cache.items():
         if not day.file_path:
             continue
+        original_flat = flatten_tasks(day.original_task_list)
+        all_flat = flatten_tasks(day.task_list)
         status_changed = [
-            t for t in flatten_tasks(day.original_task_list)
-            if t.line_number > 0
-            and day.original_lines.get(t.line_number) != t.to_line()
+            t for t in original_flat
+            if t.line_number in day.original_lines
+            and day.original_lines[t.line_number] != t.to_line()
         ]
-        br_tasks = block_rewrite_tasks(flatten_tasks(day.task_list))
-        if not status_changed and not br_tasks:
+        body_changed = [
+            t for t in original_flat
+            if t.line_number in day.original_bodies
+            and day.original_bodies[t.line_number] != t.body
+        ]
+        br_tasks = block_rewrite_tasks(all_flat)
+        if not status_changed and not body_changed and not br_tasks:
             continue
         if day.file_path not in backed_up:
             BackupManager.backup(day.file_path, directory)
             backed_up.add(day.file_path)
         with open(day.file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
+        # Build body remove/insert sets (skip tasks covered by a block rewrite).
+        br_ids = {id(t) for t in br_tasks}
+        body_remove: set[int] = set()
+        body_insert: dict[int, list[str]] = {}
+        for t in body_changed:
+            if id(t) not in br_ids:
+                body_remove.update(t.body_line_numbers)
+                body_insert[t.line_number] = task_body_lines(t)
         if br_tasks:
             rewrites = {t.line_number: task_to_lines(t) for t in br_tasks}
             remove = set()
             for t in br_tasks:
                 remove.update(_block_lines(t) - {t.line_number})
+            remove |= body_remove
             status_dict = {t.line_number: t.to_line() + '\n' for t in status_changed}
             new_lines = []
             for i, line in enumerate(lines, 1):
@@ -158,12 +183,22 @@ def save_cache(cache: dict, directory: str) -> None:
                 if i in status_dict:
                     line = status_dict[i]
                 new_lines.append(line)
+                if i in body_insert:
+                    new_lines.extend(body_insert[i])
             FileWriter.write_atomic(day.file_path, new_lines)
         else:
-            for task in status_changed:
-                if 0 < task.line_number <= len(lines):
-                    lines[task.line_number - 1] = task.to_line() + '\n'
-            FileWriter.write_atomic(day.file_path, lines)
+            to_remove = body_remove
+            status_dict = {t.line_number: t.to_line() + '\n' for t in status_changed}
+            new_lines = []
+            for i, line in enumerate(lines, 1):
+                if i in to_remove:
+                    continue
+                if i in status_dict:
+                    line = status_dict[i]
+                new_lines.append(line)
+                if i in body_insert:
+                    new_lines.extend(body_insert[i])
+            FileWriter.write_atomic(day.file_path, new_lines)
 
     # Remove deleted tasks.
     for key, day in cache.items():
