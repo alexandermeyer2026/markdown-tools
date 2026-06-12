@@ -225,6 +225,8 @@ def save_cache(cache: dict, directory: str) -> None:
                         break
                 elif ln == task.line_number:
                     found = True
+            while block_end > task.line_number and lines[block_end - 1].strip() == '':
+                block_end -= 1
             to_remove.update(range(task.line_number, block_end + 1))
         FileWriter.write_atomic(day.file_path, [ln for i, ln in enumerate(lines, 1) if i not in to_remove])
         day.deleted_tasks.clear()
