@@ -379,20 +379,19 @@ class WeekGrid(Widget, can_focus=True):
         from .task_form_screen import TaskFormScreen, TaskFormResult
 
         def on_form_result(result: TaskFormResult | None) -> None:
-            if result is None:
-                return
-            task.title = result.title
-            task.status = result.status
-            task.body = result.body
-            if result.time_start:
-                task.time = TaskTime(
-                    start=result.time_start,
-                    end=result.time_end if result.time_end else None,
-                )
-            else:
-                task.time = None
-            fix_parent_refs(task.children, task)
-            self.refresh()
+            if result is not None:
+                task.title = result.title
+                task.status = result.status
+                task.body = result.body
+                if result.time_start:
+                    task.time = TaskTime(
+                        start=result.time_start,
+                        end=result.time_end if result.time_end else None,
+                    )
+                else:
+                    task.time = None
+                fix_parent_refs(task.children, task)
+            self.call_after_refresh(self.refresh)
 
         self.app.push_screen(TaskFormScreen(task), on_form_result)
 

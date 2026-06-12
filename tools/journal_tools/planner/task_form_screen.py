@@ -140,7 +140,7 @@ class SubtaskList(Widget, can_focus=True):
                 )
             else:
                 selected.time = None
-            self.refresh()
+            self.refresh(layout=True)
 
         self.app.push_screen(TaskFormScreen(selected), on_result)
 
