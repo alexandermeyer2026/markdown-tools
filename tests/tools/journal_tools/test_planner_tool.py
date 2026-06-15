@@ -362,6 +362,15 @@ class TestPlannerState(unittest.TestCase):
         state.reload_day_by_key(key)
         self.assertGreater(len(state.days[key].original_lines), count_before)
 
+    def test_original_bodies_stores_dedented_body(self):
+        # File has "    Some notes" (raw indented); after load both task.body and
+        # original_bodies must be dedented so no spurious diff fires on the first save.
+        state = PlannerState(self.tmpdir)
+        day = state.load_day(self.date)
+        task_a = day.task_list[0]
+        self.assertEqual(task_a.body, 'Some notes')
+        self.assertEqual(day.original_bodies[task_a.line_number], 'Some notes')
+
 
 class TestTaskToLines(unittest.TestCase):
     def test_simple_todo(self):
@@ -1087,3 +1096,302 @@ class TestTaskFormScreen(unittest.TestCase):
         self.assertIn('Indented note', inspected['body'])
         self.assertNotIn('    Indented note', inspected['body'])
         self.assertIn('Another line', inspected['body'])
+
+    # ── Subtasks ──────────────────────────────────────────────────────────────
+
+    def test_subtask_added_to_result(self):
+        from textual.widgets import Input
+        from tools.journal_tools.planner.task_form_screen import SubtaskList
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            screen.query_one('#title', Input).value = 'Parent'
+            screen.query_one(SubtaskList).focus()
+            await pilot.pause()
+            await pilot.press('n')
+            await pilot.pause()
+            pilot.app.screen.query_one('#title', Input).value = 'Child'
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        r = dismissed[0]
+        self.assertIsNotNone(r)
+        self.assertEqual(r.title, 'Parent')
+        self.assertEqual(len(r.subtasks), 1)
+        self.assertEqual(r.subtasks[0].title, 'Child')
+        self.assertEqual(r.subtasks[0].status, 'todo')
+
+    def test_nested_subtask_in_result(self):
+        """Sub-subtask created inside a subtask's form appears in the grandchild slot."""
+        from textual.widgets import Input
+        from tools.journal_tools.planner.task_form_screen import SubtaskList
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            screen.query_one('#title', Input).value = 'Parent'
+            screen.query_one(SubtaskList).focus()
+            await pilot.pause()
+            await pilot.press('n')
+            await pilot.pause()
+            # child form
+            pilot.app.screen.query_one('#title', Input).value = 'Child'
+            pilot.app.screen.query_one(SubtaskList).focus()
+            await pilot.pause()
+            await pilot.press('n')
+            await pilot.pause()
+            # grandchild form
+            pilot.app.screen.query_one('#title', Input).value = 'Grandchild'
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            # back in child form
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            # back in parent form
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        r = dismissed[0]
+        self.assertIsNotNone(r)
+        self.assertEqual(len(r.subtasks), 1)
+        child = r.subtasks[0]
+        self.assertEqual(child.title, 'Child')
+        self.assertEqual(len(child.children), 1)
+        self.assertEqual(child.children[0].title, 'Grandchild')
+
+    def test_cancel_subtask_not_added(self):
+        from textual.widgets import Input
+        from tools.journal_tools.planner.task_form_screen import SubtaskList
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            screen.query_one('#title', Input).value = 'Parent'
+            screen.query_one(SubtaskList).focus()
+            await pilot.pause()
+            await pilot.press('n')
+            await pilot.pause()
+            await pilot.press('escape')
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(interact=interact))
+        r = dismissed[0]
+        self.assertIsNotNone(r)
+        self.assertEqual(r.subtasks, [])
+
+    def test_edit_subtask_updates_in_place(self):
+        from textual.widgets import Input
+        from tools.journal_tools.planner.task_form_screen import SubtaskList
+
+        child = Task(title='Original', status='todo', time=None, line_number=-1, indent='  ')
+        task = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                    children=[child])
+        child.parent = task
+
+        async def interact(pilot):
+            screen = pilot.app.screen
+            screen.query_one(SubtaskList).focus()
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+            pilot.app.screen.query_one('#title', Input).value = 'Updated'
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(task=task, interact=interact))
+        r = dismissed[0]
+        self.assertIsNotNone(r)
+        self.assertEqual(len(r.subtasks), 1)
+        self.assertEqual(r.subtasks[0].title, 'Updated')
+
+    def test_delete_subtask(self):
+        from tools.journal_tools.planner.task_form_screen import SubtaskList
+
+        child = Task(title='ToDelete', status='todo', time=None, line_number=-1, indent='  ')
+        task = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
+                    children=[child])
+        child.parent = task
+
+        async def interact(pilot):
+            pilot.app.screen.query_one(SubtaskList).focus()
+            await pilot.pause()
+            await pilot.press('D')
+            await pilot.pause()
+            await pilot.click('#yes')
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+
+        dismissed = asyncio.run(self._run_form(task=task, interact=interact))
+        r = dismissed[0]
+        self.assertIsNotNone(r)
+        self.assertEqual(r.subtasks, [])
+
+
+class TestWeekGridBodySave(unittest.TestCase):
+    """Pilot-driven tests for WeekScreen task note detection and save path."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task A\n    Some notes\n- [ ] Task B\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _read(self):
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), encoding='utf-8') as f:
+            return f.read()
+
+    def _patch_today(self, week_today='2024-01-10'):
+        fixed = datetime.date.fromisoformat(week_today)
+        mock_dt = MagicMock()
+        mock_dt.date.today.return_value = fixed
+        mock_dt.timedelta = datetime.timedelta
+        mock_dt.date.fromisoformat = datetime.date.fromisoformat
+        return patch('tools.journal_tools.planner.week_screen.datetime', mock_dt)
+
+    def test_edit_note_marks_dirty(self):
+        from textual.widgets import TextArea
+
+        async def run():
+            with self._patch_today():
+                app = PlannerApp(self.tmpdir)
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await pilot.press('enter')
+                    await pilot.pause()
+                    pilot.app.screen.query_one('#body', TextArea).text = 'New notes'
+                    await pilot.press('ctrl+s')
+                    await pilot.pause()
+                    grid = pilot.app.screen.query_one(WeekGrid)
+                    return cache_has_changes(grid._planner.days)
+
+        self.assertTrue(asyncio.run(run()))
+
+    def test_edit_note_persisted_on_save(self):
+        from textual.widgets import TextArea
+
+        async def run():
+            with self._patch_today():
+                app = PlannerApp(self.tmpdir)
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await pilot.press('enter')
+                    await pilot.pause()
+                    pilot.app.screen.query_one('#body', TextArea).text = 'New notes'
+                    await pilot.press('ctrl+s')   # save form
+                    await pilot.pause()
+                    await pilot.press('ctrl+s')   # open save dialog
+                    await pilot.pause()
+                    if isinstance(pilot.app.screen, SaveDialog):
+                        await pilot.click('#yes')
+                        await pilot.pause()
+
+        asyncio.run(run())
+        content = self._read()
+        self.assertIn('New notes', content)
+        self.assertNotIn('Some notes', content)
+        self.assertIn('Task A', content)
+
+    def test_clear_note_persisted_on_save(self):
+        from textual.widgets import TextArea
+
+        async def run():
+            with self._patch_today():
+                app = PlannerApp(self.tmpdir)
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await pilot.press('enter')
+                    await pilot.pause()
+                    pilot.app.screen.query_one('#body', TextArea).text = ''
+                    await pilot.press('ctrl+s')   # save form
+                    await pilot.pause()
+                    await pilot.press('ctrl+s')   # open save dialog
+                    await pilot.pause()
+                    if isinstance(pilot.app.screen, SaveDialog):
+                        await pilot.click('#yes')
+                        await pilot.pause()
+
+        asyncio.run(run())
+        content = self._read()
+        self.assertNotIn('Some notes', content)
+        self.assertIn('Task A', content)
+        self.assertIn('Task B', content)
+
+    def test_unchanged_note_not_dirty(self):
+        """Opening a task form and saving without changes must not mark the cache dirty.
+        Regression: raw-indented body in original_bodies vs dedented post-form body
+        always compared unequal and triggered a spurious rewrite."""
+
+        async def run():
+            with self._patch_today():
+                app = PlannerApp(self.tmpdir)
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await pilot.press('enter')
+                    await pilot.pause()
+                    await pilot.press('ctrl+s')   # save form with no changes
+                    await pilot.pause()
+                    grid = pilot.app.screen.query_one(WeekGrid)
+                    return cache_has_changes(grid._planner.days)
+
+        self.assertFalse(asyncio.run(run()))
+
+
+class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
+    """Unit tests for blank line preservation when deleting tasks via save_cache."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _write(self, content, date='2024-03-15'):
+        path = os.path.join(self.tmpdir, f'{date}.md')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def _read(self, date='2024-03-15'):
+        with open(os.path.join(self.tmpdir, f'{date}.md'), encoding='utf-8') as f:
+            return f.read()
+
+    def _delete_and_save(self, state, task, date=datetime.date(2024, 3, 15)):
+        from tools.journal_tools.planner.weekly import save_cache
+        day = state.days[date.isoformat()]
+        if task.parent is None:
+            day.task_list.remove(task)
+        else:
+            task.parent.children.remove(task)
+        day.deleted_tasks.append(task)
+        save_cache(state.days, self.tmpdir)
+
+    def test_delete_root_task_preserves_blank_line(self):
+        self._write("- [ ] Task A\n\n- [ ] Task B\n")
+        state = PlannerState(self.tmpdir)
+        state.load_day(datetime.date(2024, 3, 15))
+        task_a = state.days['2024-03-15'].task_list[0]
+        self._delete_and_save(state, task_a)
+        content = self._read()
+        self.assertNotIn('Task A', content)
+        self.assertIn('Task B', content)
+        # blank line was between Task A and Task B; after Task A is removed it
+        # becomes a leading blank — verify it was not consumed by the deletion
+        self.assertTrue(content.startswith('\n'))
+
+    def test_delete_subtask_preserves_blank_line(self):
+        # Mirrors the live regression: a sub-task written by block-rewrite gets a
+        # real line_number; deleting it must not consume the blank line that follows.
+        self._write("- [ ] Parent\n    - [ ] Sub\n\n- [ ] Task B\n")
+        state = PlannerState(self.tmpdir)
+        state.load_day(datetime.date(2024, 3, 15))
+        parent = state.days['2024-03-15'].task_list[0]
+        sub = parent.children[0]
+        self._delete_and_save(state, sub)
+        content = self._read()
+        self.assertNotIn('Sub', content)
+        self.assertIn('Parent', content)
+        self.assertIn('Task B', content)
+        self.assertIn('\n\n', content)
