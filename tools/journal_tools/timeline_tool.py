@@ -113,10 +113,13 @@ class TimelineTool:
 
         hours_line, scale_line = scale_lines(step, first_task_slot, now_marker_slot)
 
+        now_col = None
         if now_marker_slot is not None:
-            now_col = now_marker_slot - first_task_slot
-            hours_line = insert_now_marker(hours_line, now_col)
-            scale_line = scale_line[:now_col] + WHITE + '▼' + RESET + scale_line[now_col + 1:]
+            _col = now_marker_slot - first_task_slot
+            if _col >= 0:
+                now_col = _col
+                hours_line = insert_now_marker(hours_line, now_col)
+                scale_line = scale_line[:now_col] + WHITE + '▼' + RESET + scale_line[now_col + 1:]
 
         lines = [hours_line, scale_line]
         for task in timed_tasks:
@@ -124,7 +127,7 @@ class TimelineTool:
             task_line = TimelineTool.render_task(task, step, first_task_slot, now_marker_slot)
             task_body = body_rows(task, left_pad=icon_col)
             task_subtasks = subtask_rows(task, left_pad=icon_col)
-            if now_marker_slot is not None:
+            if now_col is not None:
                 task_line = insert_now_marker(task_line, now_col)
                 task_body = [insert_now_marker(l, now_col) for l in task_body]
                 task_subtasks = [insert_now_marker(l, now_col) for l in task_subtasks]
