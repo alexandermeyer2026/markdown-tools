@@ -1395,3 +1395,71 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
         self.assertIn('Parent', content)
         self.assertIn('Task B', content)
         self.assertIn('\n\n', content)
+
+
+class TestWeekSaveCacheTimedShift(unittest.TestCase):
+    """Regression tests for note doubling / task disappearance after shifting
+    a timed task into a day that already has timed tasks.
+
+    The bug: sort_timed_tasks reorders the newly arrived task to line 1 —
+    the same slot originally occupied by the destination day's own task.
+    _refresh_line_numbers updated line_number but left body_line_numbers and
+    original_bodies stale, so cache_has_changes fired a false positive, and a
+    second save_cache removed the wrong lines (task disappeared) and inserted
+    the body a second time (note doubled).
+
+    Setup: Day A has two untimed tasks then a timed 10:00 task with a note
+    (so task A lives at line 3, body at line 4).  Day B has a single timed
+    11:00 task with a note at line 1.  After shifting task A to day B,
+    sort_timed_tasks moves task A to line 1 and task B to line 4 — exactly
+    where task A's stale body_line_numbers pointed."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        # Day A: two padding tasks push "Task A" to line 3, body to line 4
+        with open(os.path.join(self.tmpdir, '2024-01-09.md'), 'w', encoding='utf-8') as f:
+            f.write("- [ ] Task X\n- [ ] Task Y\n- [ ] 10:00 Task A\n  Note for A\n")
+        # Day B: single timed task at line 1 with note at line 2
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w', encoding='utf-8') as f:
+            f.write("- [ ] 11:00 Task B\n  Note for B\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _read(self, date):
+        with open(os.path.join(self.tmpdir, f'{date}.md'), encoding='utf-8') as f:
+            return f.read()
+
+    def _shift_and_save(self):
+        from tools.journal_tools.planner.weekly import save_cache
+        state = PlannerState(self.tmpdir)
+        date_a = datetime.date(2024, 1, 9)
+        date_b = datetime.date(2024, 1, 10)
+        state.load_day(date_a)
+        state.load_day(date_b)
+        task_a = state.days[date_a.isoformat()].task_list[2]  # 10:00 Task A
+        state.days[date_a.isoformat()].task_list.remove(task_a)
+        state.days[date_b.isoformat()].task_list.append(task_a)
+        save_cache(state.days, self.tmpdir)
+        return state, save_cache
+
+    def test_no_spurious_dirty_flag_after_timed_shift(self):
+        """cache_has_changes must be False right after the first save_cache.
+
+        Regression: stale original_bodies caused a false positive that
+        triggered an unnecessary second save dialog."""
+        state, _ = self._shift_and_save()
+        self.assertFalse(cache_has_changes(state.days))
+
+    def test_no_data_corruption_on_resave_after_timed_shift(self):
+        """Calling save_cache a second time must not double the note or
+        remove task B.
+
+        Regression: stale body_line_numbers pointed at task B's header line,
+        so the second save removed task B and inserted task A's note twice."""
+        state, save_cache = self._shift_and_save()
+        save_cache(state.days, self.tmpdir)  # second call — must be a no-op
+        content = self._read('2024-01-10')
+        self.assertEqual(content.count('Note for A'), 1, "note must not be doubled")
+        self.assertIn('Task B', content, "Task B must not disappear")
+        self.assertIn('Note for B', content, "Task B's note must not disappear")

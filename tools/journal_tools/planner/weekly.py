@@ -102,11 +102,20 @@ def _refresh_line_numbers(cache: dict, backed_up: set) -> None:
             ln_by_content: dict[str, int] = {}
             for t in flatten_tasks(fresh):
                 ln_by_content.setdefault(t.to_line(), t.line_number)
+            fresh_by_ln: dict[int, object] = {t.line_number: t for t in flatten_tasks(fresh)}
             for task in flatten_tasks(day.task_list):
                 new_ln = ln_by_content.get(task.to_line())
                 if new_ln is not None:
                     task.line_number = new_ln
+                    fresh_task = fresh_by_ln.get(new_ln)
+                    if fresh_task is not None:
+                        task.body_line_numbers = list(fresh_task.body_line_numbers)
             day.original_lines = {t.line_number: t.to_line() for t in flatten_tasks(fresh)}
+            day.original_bodies = {
+                task.line_number: task.body
+                for task in flatten_tasks(day.task_list)
+                if task.body is not None
+            }
         except Exception:
             pass
 
