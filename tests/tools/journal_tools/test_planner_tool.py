@@ -20,7 +20,6 @@ from tools.journal_tools.planner.day_screen import DayGrid
 from tools.journal_tools.planner.save_dialog import SaveDialog
 from tools.journal_tools.planner.task_form_screen import TaskFormScreen, TaskFormResult
 from tools.journal_tools.planner.week_screen import WeekGrid
-from tools.journal_tools.planner.utils import task_to_lines
 from tools.journal_tools.planner.weekly import (
     append_block, cache_has_changes, remove_block, sort_timed_nodes, task_to_block,
 )
@@ -139,38 +138,6 @@ class TestPlannerState(unittest.TestCase):
         task_a = day.task_list[0]
         self.assertEqual(task_a.body, 'Some notes')
 
-
-class TestTaskToLines(unittest.TestCase):
-    def test_simple_todo(self):
-        task = Task(title='Buy milk', status='todo', time=None, line_number=1, indent='')
-        self.assertEqual(task_to_lines(task), ['- [ ] Buy milk\n'])
-
-    def test_done_task(self):
-        task = Task(title='Buy milk', status='done', time=None, line_number=1, indent='')
-        self.assertEqual(task_to_lines(task), ['- [x] Buy milk\n'])
-
-    def test_timed_task(self):
-        task = Task(title='Meeting', status='todo',
-                    time=TaskTime(start='9:00', end='10:00'), line_number=1, indent='')
-        self.assertEqual(task_to_lines(task), ['- [ ] 9:00-10:00 Meeting\n'])
-
-    def test_with_child(self):
-        child = Task(title='Sub', status='done', time=None, line_number=2, indent='  ')
-        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        child.parent = parent
-        self.assertEqual(task_to_lines(parent), ['- [ ] Parent\n', '  - [x] Sub\n'])
-
-    def test_deeply_nested(self):
-        grandchild = Task(title='Leaf', status='todo', time=None, line_number=3, indent='    ')
-        child = Task(title='Mid', status='todo', time=None, line_number=2, indent='  ',
-                     children=[grandchild])
-        parent = Task(title='Root', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        grandchild.parent = child
-        child.parent = parent
-        self.assertEqual(task_to_lines(parent),
-                         ['- [ ] Root\n', '  - [ ] Mid\n', '    - [ ] Leaf\n'])
 
 
 @pytest.mark.integration
@@ -1087,9 +1054,7 @@ class TestWeekGridBodySave(unittest.TestCase):
         self.assertIn('Task B', content)
 
     def test_unchanged_note_not_dirty(self):
-        """Opening a task form and saving without changes must not mark the cache dirty.
-        Regression: raw-indented body in original_bodies vs dedented post-form body
-        always compared unequal and triggered a spurious rewrite."""
+        """Opening a task form and saving without changes must not mark the cache dirty."""
 
         async def run():
             with self._patch_today():
@@ -1169,18 +1134,10 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
     """Regression tests for note doubling / task disappearance after shifting
     a timed task into a day that already has timed tasks.
 
-    The bug: sort_timed_tasks reorders the newly arrived task to line 1 —
-    the same slot originally occupied by the destination day's own task.
-    _refresh_line_numbers updated line_number but left body_line_numbers and
-    original_bodies stale, so cache_has_changes fired a false positive, and a
-    second save_cache removed the wrong lines (task disappeared) and inserted
-    the body a second time (note doubled).
-
-    Setup: Day A has two untimed tasks then a timed 10:00 task with a note
-    (so task A lives at line 3, body at line 4).  Day B has a single timed
-    11:00 task with a note at line 1.  After shifting task A to day B,
-    sort_timed_tasks moves task A to line 1 and task B to line 4 — exactly
-    where task A's stale body_line_numbers pointed."""
+    Setup: Day A has two untimed tasks then a timed 10:00 task with a note.
+    Day B has a single timed 11:00 task with a note.  After shifting task A
+    to day B, sort_timed_nodes reorders the blocks; a second save_cache call
+    must be a no-op (no corruption, no false dirty flag)."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -1220,19 +1177,12 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
         return state, save_cache
 
     def test_no_spurious_dirty_flag_after_timed_shift(self):
-        """cache_has_changes must be False right after the first save_cache.
-
-        Regression: stale original_bodies caused a false positive that
-        triggered an unnecessary second save dialog."""
+        """cache_has_changes must be False right after the first save_cache."""
         state, _ = self._shift_and_save()
         self.assertFalse(cache_has_changes(state.days))
 
     def test_no_data_corruption_on_resave_after_timed_shift(self):
-        """Calling save_cache a second time must not double the note or
-        remove task B.
-
-        Regression: stale body_line_numbers pointed at task B's header line,
-        so the second save removed task B and inserted task A's note twice."""
+        """Calling save_cache a second time must not double the note or remove task B."""
         state, save_cache = self._shift_and_save()
         save_cache(state.days, self.tmpdir)  # second call — must be a no-op
         content = self._read('2024-01-10')
