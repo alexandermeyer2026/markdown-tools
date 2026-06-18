@@ -410,7 +410,6 @@ class WeekGrid(Widget, can_focus=True):
 
         def on_form_result(result: TaskFormResult | None) -> None:
             if result is not None:
-                body_before = task.body
                 task.title = result.title
                 task.status = result.status
                 task.body = result.body
@@ -425,8 +424,7 @@ class WeekGrid(Widget, can_focus=True):
                 block = self._planner.days[day_key].find_block(task)
                 if block:
                     block.refresh_header()
-                    if task.body != body_before:
-                        sync_body_to_block(block, task)
+                    sync_body_to_block(block, task)
             self.call_after_refresh(self.refresh)
 
         self.app.push_screen(TaskFormScreen(task), on_form_result)

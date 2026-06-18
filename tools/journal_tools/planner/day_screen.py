@@ -387,7 +387,6 @@ class DayGrid(Widget, can_focus=True):
         def on_result(result: TaskFormResult | None) -> None:
             if result is None:
                 return
-            body_before = task.body
             task.title = result.title
             task.status = result.status
             task.body = result.body
@@ -402,8 +401,7 @@ class DayGrid(Widget, can_focus=True):
             block = self._day().find_block(task)
             if block:
                 block.refresh_header()
-                if task.body != body_before:
-                    sync_body_to_block(block, task)
+                sync_body_to_block(block, task)
             nav = self._navigable()
             self.cursor_idx = next(
                 (i for i, t in enumerate(nav) if t is task),

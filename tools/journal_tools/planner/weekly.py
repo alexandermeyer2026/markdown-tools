@@ -131,6 +131,7 @@ def sync_body_to_block(block: TaskBlock, task: Task) -> None:
             new_nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
     for child in task.children:
         child_block = child_blocks.get(id(child)) or task_to_block(child)
+        child_block.refresh_header()
         new_nodes.append(child_block)
     block.nodes[:] = new_nodes
 
