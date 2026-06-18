@@ -100,11 +100,18 @@ def sort_timed_nodes(nodes: list) -> None:
     sorted_blocks = timed + untimed
     if sorted_blocks == blocks:
         return
+    # Only insert blank separators if the original list already had them between tasks.
+    has_separator = any(
+        isinstance(nodes[i], RawLine) and not nodes[i].raw.strip()
+        and any(isinstance(nodes[j], TaskBlock) for j in range(i))
+        and any(isinstance(nodes[j], TaskBlock) for j in range(i + 1, len(nodes)))
+        for i in range(len(nodes))
+    )
     first_block_idx = next((i for i, n in enumerate(nodes) if isinstance(n, TaskBlock)), len(nodes))
     leading = nodes[:first_block_idx]
     task_section = []
     for i, block in enumerate(sorted_blocks):
-        if i > 0:
+        if i > 0 and has_separator:
             task_section.append(RawLine('\n'))
         task_section.append(block)
     nodes.clear()
