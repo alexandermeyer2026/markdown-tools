@@ -18,7 +18,10 @@ from tools.journal_tools.rendering import (
 from .daily import has_changes, save
 from .state import DayCache, PlannerState
 from .utils import flatten_tasks
-from .weekly import append_block, remove_block, sort_timed_nodes, task_to_block
+from .weekly import (
+    append_block, move_block_in_nodes, remove_block, shift_tab_task,
+    sort_timed_nodes, tab_task, task_to_block,
+)
 
 _STEP = 0.25          # hours per slot (15 min)
 _STEP_M = int(_STEP * 60)
@@ -46,6 +49,10 @@ class DayGrid(Widget, can_focus=True):
         Binding("s",      "status_started",     show=False),
         Binding("d",      "status_done",        show=False),
         Binding("f",      "status_failed",      show=False),
+        Binding("tab",        "tab_task",       show=False),
+        Binding("shift+tab",  "shift_tab_task", show=False),
+        Binding("J",          "move_down",      show=False),
+        Binding("K",          "move_up",        show=False),
         Binding("enter",  "edit_task",          show=False),
         Binding("n",      "new_task",           show=False),
         Binding("D",      "delete_task",        show=False),
@@ -384,6 +391,31 @@ class DayGrid(Widget, can_focus=True):
     def action_status_started(self)     -> None: self._set_status("started")
     def action_status_done(self)        -> None: self._set_status("done")
     def action_status_failed(self)      -> None: self._set_status("failed")
+
+    # ── Hierarchy / reorder ───────────────────────────────────────────────────
+
+    def _move_hierarchy(self, fn) -> None:
+        task = self._selected()
+        if task is None:
+            return
+        if fn(self._day().nodes, task):
+            nav = self._navigable()
+            self.cursor_idx = next(
+                (i for i, t in enumerate(nav) if t is task), self.cursor_idx
+            )
+            self.refresh()
+
+    def action_tab_task(self) -> None:
+        self._move_hierarchy(tab_task)
+
+    def action_shift_tab_task(self) -> None:
+        self._move_hierarchy(shift_tab_task)
+
+    def action_move_down(self) -> None:
+        self._move_hierarchy(lambda nodes, task: move_block_in_nodes(nodes, task, 1))
+
+    def action_move_up(self) -> None:
+        self._move_hierarchy(lambda nodes, task: move_block_in_nodes(nodes, task, -1))
 
     # ── Form actions ──────────────────────────────────────────────────────────
 

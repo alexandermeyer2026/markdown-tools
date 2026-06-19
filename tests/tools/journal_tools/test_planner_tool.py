@@ -1194,3 +1194,210 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
         self.assertEqual(content.count('Note for A'), 1, "note must not be doubled")
         self.assertIn('Task B', content, "Task B must not disappear")
         self.assertIn('Note for B', content, "Task B's note must not disappear")
+
+
+class TestDayGridHierarchyReorder(unittest.TestCase):
+    """Pilot-driven tests for Tab/Shift+Tab and J/K in DayGrid."""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False, encoding='utf-8'
+        )
+        self.tmp.write("- [ ] Task A\n- [ ] Task B\n")
+        self.tmp.close()
+        self.path = self.tmp.name
+        self.directory = os.path.dirname(self.path)
+
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def _write(self, content):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    async def _inspect_day(self, keys):
+        app = PlannerApp(self.directory, file_path=self.path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            for key in keys:
+                await pilot.press(key)
+            grid = app.screen.query_one(DayGrid)
+            return grid._day(), grid.cursor_idx
+
+    # ── Tab ───────────────────────────────────────────────────────────────────
+
+    def test_tab_makes_second_task_child_of_first(self):
+        day, _ = asyncio.run(self._inspect_day(['j', 'tab']))
+        tl = day.task_list
+        self.assertEqual(len(tl), 1)
+        self.assertEqual(tl[0].task.title, 'Task A')
+        children = [n for n in tl[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].task.title, 'Task B')
+
+    def test_tab_on_first_task_is_noop(self):
+        day, _ = asyncio.run(self._inspect_day(['tab']))
+        self.assertEqual(len(day.task_list), 2)
+
+    def test_tab_updates_indent(self):
+        from config import get_indent_step
+        day, _ = asyncio.run(self._inspect_day(['j', 'tab']))
+        child = day.task_list[0].nodes[0]
+        self.assertEqual(child.task.indent, get_indent_step())
+
+    def test_tab_cursor_follows_task(self):
+        day, cursor_idx = asyncio.run(self._inspect_day(['j', 'tab']))
+        from tools.journal_tools.planner.utils import flatten_tasks
+        nav = flatten_tasks(day.task_list)
+        self.assertEqual(nav[cursor_idx].title, 'Task B')
+
+    # ── Shift+Tab ─────────────────────────────────────────────────────────────
+
+    def test_shift_tab_promotes_subtask_to_top_level(self):
+        self._write("- [ ] Task A\n    - [ ] Task B\n")
+        day, _ = asyncio.run(self._inspect_day(['j', 'shift+tab']))
+        tl = day.task_list
+        self.assertEqual(len(tl), 2)
+        self.assertEqual(tl[1].task.title, 'Task B')
+        children = [n for n in tl[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(children, [])
+
+    def test_shift_tab_on_top_level_is_noop(self):
+        day, _ = asyncio.run(self._inspect_day(['shift+tab']))
+        self.assertEqual(len(day.task_list), 2)
+
+    def test_shift_tab_cursor_follows_task(self):
+        self._write("- [ ] Task A\n    - [ ] Task B\n")
+        day, cursor_idx = asyncio.run(self._inspect_day(['j', 'shift+tab']))
+        from tools.journal_tools.planner.utils import flatten_tasks
+        nav = flatten_tasks(day.task_list)
+        self.assertEqual(nav[cursor_idx].title, 'Task B')
+
+    # ── J / K ─────────────────────────────────────────────────────────────────
+
+    def test_J_moves_task_down(self):
+        day, _ = asyncio.run(self._inspect_day(['J']))
+        tl = day.task_list
+        self.assertEqual(tl[0].task.title, 'Task B')
+        self.assertEqual(tl[1].task.title, 'Task A')
+
+    def test_K_moves_task_up(self):
+        day, _ = asyncio.run(self._inspect_day(['j', 'K']))
+        tl = day.task_list
+        self.assertEqual(tl[0].task.title, 'Task B')
+        self.assertEqual(tl[1].task.title, 'Task A')
+
+    def test_J_at_last_untimed_is_noop(self):
+        day, _ = asyncio.run(self._inspect_day(['j', 'J']))
+        tl = day.task_list
+        self.assertEqual(tl[0].task.title, 'Task A')
+        self.assertEqual(tl[1].task.title, 'Task B')
+
+    def test_K_at_first_untimed_is_noop(self):
+        day, _ = asyncio.run(self._inspect_day(['K']))
+        tl = day.task_list
+        self.assertEqual(tl[0].task.title, 'Task A')
+        self.assertEqual(tl[1].task.title, 'Task B')
+
+    def test_J_on_timed_task_is_noop(self):
+        self._write("- [ ] 9:00-10:00 Meeting\n- [ ] Task B\n")
+        day, _ = asyncio.run(self._inspect_day(['J']))
+        self.assertEqual(day.task_list[0].task.title, 'Meeting')
+
+    def test_J_cursor_follows_task(self):
+        day, cursor_idx = asyncio.run(self._inspect_day(['J']))
+        from tools.journal_tools.planner.utils import flatten_tasks
+        nav = flatten_tasks(day.task_list)
+        self.assertEqual(nav[cursor_idx].title, 'Task A')
+
+
+class TestWeekGridHierarchyReorder(unittest.TestCase):
+    """Pilot-driven tests for Tab/Shift+Tab and J/K in WeekGrid."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write("- [ ] Task A\n- [ ] Task B\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _write(self, content):
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write(content)
+
+    async def _inspect(self, keys, week_today='2024-01-10'):
+        fixed = datetime.date.fromisoformat(week_today)
+        mock_dt = MagicMock()
+        mock_dt.date.today.return_value = fixed
+        mock_dt.timedelta = datetime.timedelta
+        mock_dt.date.fromisoformat = datetime.date.fromisoformat
+        with patch('tools.journal_tools.planner.week_screen.datetime', mock_dt):
+            app = PlannerApp(self.tmpdir)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                for key in keys:
+                    await pilot.press(key)
+                grid = app.screen.query_one(WeekGrid)
+                return grid._state, grid.cursor_col, grid.cursor_row
+
+    # ── Tab ───────────────────────────────────────────────────────────────────
+
+    def test_tab_makes_second_task_child_of_first(self):
+        state, col, _ = asyncio.run(self._inspect(['j', 'tab']))
+        tl = state.day(col).task_list
+        self.assertEqual(len(tl), 1)
+        self.assertEqual(tl[0].task.title, 'Task A')
+        children = [n for n in tl[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0].task.title, 'Task B')
+
+    def test_tab_on_first_task_is_noop(self):
+        state, col, _ = asyncio.run(self._inspect(['tab']))
+        self.assertEqual(len(state.day(col).task_list), 2)
+
+    def test_tab_cursor_row_follows_task(self):
+        state, col, row = asyncio.run(self._inspect(['j', 'tab']))
+        from tools.journal_tools.planner.utils import week_expanded
+        exp = week_expanded(state.day(col).task_list)
+        self.assertEqual(exp[row][0].title, 'Task B')
+
+    # ── Shift+Tab ─────────────────────────────────────────────────────────────
+
+    def test_shift_tab_promotes_subtask(self):
+        self._write("- [ ] Task A\n    - [ ] Task B\n")
+        state, col, _ = asyncio.run(self._inspect(['j', 'shift+tab']))
+        tl = state.day(col).task_list
+        self.assertEqual(len(tl), 2)
+        children = [n for n in tl[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(children, [])
+
+    def test_shift_tab_on_top_level_is_noop(self):
+        state, col, _ = asyncio.run(self._inspect(['shift+tab']))
+        self.assertEqual(len(state.day(col).task_list), 2)
+
+    # ── J / K ─────────────────────────────────────────────────────────────────
+
+    def test_J_moves_task_down(self):
+        state, col, _ = asyncio.run(self._inspect(['J']))
+        tl = state.day(col).task_list
+        self.assertEqual(tl[0].task.title, 'Task B')
+        self.assertEqual(tl[1].task.title, 'Task A')
+
+    def test_K_moves_task_up(self):
+        state, col, _ = asyncio.run(self._inspect(['j', 'K']))
+        tl = state.day(col).task_list
+        self.assertEqual(tl[0].task.title, 'Task B')
+        self.assertEqual(tl[1].task.title, 'Task A')
+
+    def test_J_cursor_row_follows_task(self):
+        state, col, row = asyncio.run(self._inspect(['J']))
+        from tools.journal_tools.planner.utils import week_expanded
+        exp = week_expanded(state.day(col).task_list)
+        self.assertEqual(exp[row][0].title, 'Task A')
+
+    def test_J_on_timed_task_is_noop(self):
+        self._write("- [ ] 9:00-10:00 Meeting\n- [ ] Task B\n")
+        state, col, _ = asyncio.run(self._inspect(['J']))
+        self.assertEqual(state.day(col).task_list[0].task.title, 'Meeting')

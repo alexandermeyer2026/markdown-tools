@@ -18,9 +18,12 @@ from .weekly import (
     DAY_NAMES,
     append_block,
     cache_has_changes,
+    move_block_in_nodes,
     remove_block,
     save_cache,
+    shift_tab_task,
     shift_task,
+    tab_task,
     task_to_block,
 )
 
@@ -48,6 +51,10 @@ class WeekGrid(Widget, can_focus=True):
         Binding("s",      "status_started",     show=False),
         Binding("d",      "status_done",        show=False),
         Binding("f",      "status_failed",      show=False),
+        Binding("tab",       "tab_task",       show=False),
+        Binding("shift+tab", "shift_tab_task", show=False),
+        Binding("J",         "move_down",      show=False),
+        Binding("K",         "move_up",        show=False),
         Binding("enter",  "open_or_edit",       show=False),
         Binding("n",      "new_task",           show=False),
         Binding("D",      "delete_task",        show=False),
@@ -279,6 +286,32 @@ class WeekGrid(Widget, can_focus=True):
         else:
             self.cursor_col = new_col
             self.cursor_row = new_row
+
+    def _move_hierarchy(self, fn) -> None:
+        if self._state is None or self.cursor_row < 0:
+            return
+        task = self._selected_task()
+        if task is None:
+            return
+        day_cache = self._planner.days[self._selected_day().isoformat()]
+        if fn(day_cache.nodes, task):
+            exp = week_expanded(day_cache.task_list)
+            self.cursor_row = next(
+                (i for i, (t, _) in enumerate(exp) if t is task), self.cursor_row
+            )
+            self.refresh()
+
+    def action_tab_task(self) -> None:
+        self._move_hierarchy(tab_task)
+
+    def action_shift_tab_task(self) -> None:
+        self._move_hierarchy(shift_tab_task)
+
+    def action_move_down(self) -> None:
+        self._move_hierarchy(lambda nodes, task: move_block_in_nodes(nodes, task, 1))
+
+    def action_move_up(self) -> None:
+        self._move_hierarchy(lambda nodes, task: move_block_in_nodes(nodes, task, -1))
 
     def action_carry_subtasks(self) -> None:
         if self._state is None or self.cursor_row < 0:
