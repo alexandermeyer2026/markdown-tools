@@ -36,24 +36,6 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
     return cache[key]
 
 
-def reload_day_in_cache(cache: dict, day: datetime.date, directory: str) -> None:
-    """Re-parse a day's file and replace its cache entry with a fresh baseline."""
-    key = day.isoformat()
-    files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
-    if files:
-        nodes = parse(files[0])
-        with open(files[0], 'r', encoding='utf-8') as f:
-            original_content = f.read()
-        _populate_task_relations(nodes)
-        cache[key] = DayCache(
-            file_path=files[0],
-            nodes=nodes,
-            original_content=original_content,
-            task_list=[n.task for n in nodes if isinstance(n, TaskBlock)],
-        )
-    else:
-        cache[key] = DayCache(file_path=None, nodes=[], original_content='', task_list=[])
-
 
 def cache_has_changes(cache: dict) -> bool:
     return any(serialize(day.nodes) != day.original_content for day in cache.values())

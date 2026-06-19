@@ -1,7 +1,7 @@
 import datetime
 import os
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from os_utils import FileFinder
 from parser.file_model import RawLine, TaskBlock, parse, serialize
@@ -38,7 +38,6 @@ class DayCache:
     nodes: list           # list[Node] — top-level node list (mutable)
     original_content: str # serialized file content at load time
     task_list: list       # [block.task for top-level TaskBlocks] — mutable by screens
-    deleted_tasks: list = field(default_factory=list)  # used by day_screen (Step 5)
 
     def find_block(self, task) -> 'TaskBlock | None':
         return _find_block_in(self.nodes, task)
