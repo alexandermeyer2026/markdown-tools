@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from parser.file_model import parse, populate_task_relations, all_tasks
+from parser.file_model import parse, all_tasks
 from os_utils.file_writer import FileWriter
 
 
@@ -23,7 +23,7 @@ class TestCutTask(unittest.TestCase):
     def _cut(self, content: str, task_index: int):
         path = write_temp(content)
         try:
-            nodes = parse(path); populate_task_relations(nodes); tasks = all_tasks(nodes)
+            nodes = parse(path); tasks = all_tasks(nodes)
             block = FileWriter.cut_task(path, tasks[task_index], tasks)
             remaining = read_file(path)
         finally:
@@ -99,7 +99,7 @@ class TestCutTask(unittest.TestCase):
         content = '- [ ] Parent\n  - [ ] Child 1\n  - [ ] Child 2\n'
         path = write_temp(content)
         try:
-            nodes = parse(path); populate_task_relations(nodes); tasks = all_tasks(nodes)
+            nodes = parse(path); tasks = all_tasks(nodes)
             child1 = next(t for t in tasks if t.title == 'Child 1')
             block = FileWriter.cut_task(path, child1, tasks)
             remaining = read_file(path)
@@ -150,7 +150,7 @@ class TestMoveTask(unittest.TestCase):
         src = write_temp('- [ ] Task A\n- [ ] Task B\n')
         dst = write_temp('- [ ] Task C\n')
         try:
-            nodes = parse(src); populate_task_relations(nodes); tasks = all_tasks(nodes)
+            nodes = parse(src); tasks = all_tasks(nodes)
             task_a = next(t for t in tasks if t.title == 'Task A')
             FileWriter.move_task(src, dst, task_a, tasks)
             self.assertEqual(read_file(src), '- [ ] Task B\n')
@@ -162,7 +162,7 @@ class TestMoveTask(unittest.TestCase):
         src = write_temp('- [ ] Task A\n- [ ] Task B\n')
         dst = write_temp('- [ ] Task C\n')
         try:
-            nodes = parse(src); populate_task_relations(nodes); tasks = all_tasks(nodes)
+            nodes = parse(src); tasks = all_tasks(nodes)
             task_a = next(t for t in tasks if t.title == 'Task A')
             FileWriter.move_task(src, dst, task_a, tasks)
             self.assertEqual(read_file(dst), '- [ ] Task C\n\n- [ ] Task A\n')
@@ -174,7 +174,7 @@ class TestMoveTask(unittest.TestCase):
         src = write_temp('- [ ] Parent\n  - [ ] Child\n')
         dst = write_temp('- [ ] Other\n')
         try:
-            nodes = parse(src); populate_task_relations(nodes); tasks = all_tasks(nodes)
+            nodes = parse(src); tasks = all_tasks(nodes)
             parent = next(t for t in tasks if t.title == 'Parent')
             FileWriter.move_task(src, dst, parent, tasks)
             self.assertIn('- [ ] Parent\n', read_file(dst))
@@ -190,7 +190,7 @@ class TestSortTimedTasks(unittest.TestCase):
     def _sort(self, content: str) -> str:
         path = write_temp(content)
         try:
-            nodes = parse(path); populate_task_relations(nodes); tasks = all_tasks(nodes)
+            nodes = parse(path); tasks = all_tasks(nodes)
             timed = [t for t in tasks if t.time is not None]
             FileWriter.sort_timed_tasks(path, timed, tasks)
             return read_file(path)

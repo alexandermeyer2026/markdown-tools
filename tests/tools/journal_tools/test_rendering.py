@@ -1,6 +1,7 @@
 import unittest
 
 from models import Task, TaskTime
+from parser.file_model import RawLine, TaskBlock
 from tools.journal_tools.rendering import (
     GRAY, RESET, STATUS_ICONS,
     ansi_truncate_pad, get_time_slot, scale_lines, subtask_rows,
@@ -89,52 +90,55 @@ class TestScaleLines(unittest.TestCase):
         self.assertEqual(len(scale_trim), len(scale_full) - 4)
 
 
+def _make_block(task: Task, children: list | None = None) -> TaskBlock:
+    nodes = [n for n in (children or [])]
+    return TaskBlock(task=task, header=task.to_line() + '\n', nodes=nodes)
+
+
 class TestSubtaskRows(unittest.TestCase):
-    def _child(self, title='Sub', status='todo', indent='  '):
+    def _child_task(self, title='Sub', status='todo', indent='  ') -> Task:
         return Task(title=title, status=status, time=None, line_number=2, indent=indent)
 
-    def _parent(self, children=None):
-        return Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                    children=children or [])
+    def _parent_task(self) -> Task:
+        return Task(title='Parent', status='todo', time=None, line_number=1, indent='')
 
     def test_no_children_returns_empty(self):
-        parent = self._parent()
-        self.assertEqual(subtask_rows(parent), [])
+        parent_block = _make_block(self._parent_task())
+        self.assertEqual(subtask_rows(parent_block), [])
 
     def test_single_child_produces_one_row(self):
-        child = self._child(status='done')
-        parent = self._parent(children=[child])
-        child.parent = parent
-        rows = subtask_rows(parent)
+        child = self._child_task(status='done')
+        child_block = _make_block(child)
+        parent_block = _make_block(self._parent_task(), children=[child_block])
+        rows = subtask_rows(parent_block)
         self.assertEqual(len(rows), 1)
 
     def test_unselected_child_contains_icon_and_title(self):
-        child = self._child(title='Buy milk', status='done')
-        parent = self._parent(children=[child])
-        child.parent = parent
-        row = subtask_rows(parent)[0]
+        child = self._child_task(title='Buy milk', status='done')
+        child_block = _make_block(child)
+        parent_block = _make_block(self._parent_task(), children=[child_block])
+        row = subtask_rows(parent_block)[0]
         self.assertIn(STATUS_ICONS['done'], row)
         self.assertIn('Buy milk', row)
         self.assertIn(GRAY, row)
         self.assertNotIn('\x1b[7m', row)
 
     def test_selected_child_has_reverse_highlight(self):
-        child = self._child(title='Buy milk', status='todo')
-        parent = self._parent(children=[child])
-        child.parent = parent
-        row = subtask_rows(parent, selected_task=child)[0]
+        child = self._child_task(title='Buy milk', status='todo')
+        child_block = _make_block(child)
+        parent_block = _make_block(self._parent_task(), children=[child_block])
+        row = subtask_rows(parent_block, selected_task=child)[0]
         self.assertIn('\x1b[7m', row)
         self.assertIn('> ', row)
         self.assertIn('Buy milk', row)
 
     def test_nested_children_all_returned(self):
         grandchild = Task(title='Leaf', status='todo', time=None, line_number=3, indent='    ')
-        child = self._child(title='Mid')
-        child.children = [grandchild]
-        grandchild.parent = child
-        parent = self._parent(children=[child])
-        child.parent = parent
-        rows = subtask_rows(parent)
+        grandchild_block = _make_block(grandchild)
+        child = self._child_task(title='Mid')
+        child_block = _make_block(child, children=[grandchild_block])
+        parent_block = _make_block(self._parent_task(), children=[child_block])
+        rows = subtask_rows(parent_block)
         self.assertEqual(len(rows), 2)
         self.assertIn('Mid', rows[0])
         self.assertIn('Leaf', rows[1])

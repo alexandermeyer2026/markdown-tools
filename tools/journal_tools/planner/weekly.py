@@ -5,9 +5,8 @@ from config import get_indent_step
 from models import Task, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter
 from parser.file_model import RawLine, TaskBlock, parse, serialize
-from parser.file_model import populate_task_relations
 from .state import DayCache, WeekState
-from .utils import root_task, week_expanded
+from .utils import week_expanded
 
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -20,22 +19,18 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
             nodes = parse(files[0])
             with open(files[0], 'r', encoding='utf-8') as f:
                 original_content = f.read()
-            populate_task_relations(nodes)
             cache[key] = DayCache(
                 file_path=files[0],
                 nodes=nodes,
                 original_content=original_content,
-                task_list=[n.task for n in nodes if isinstance(n, TaskBlock)],
             )
         else:
             cache[key] = DayCache(
                 file_path=None,
                 nodes=[],
                 original_content='',
-                task_list=[],
             )
     return cache[key]
-
 
 
 def cache_has_changes(cache: dict) -> bool:
@@ -83,7 +78,6 @@ def sort_timed_nodes(nodes: list) -> None:
     sorted_blocks = timed + untimed
     if sorted_blocks == blocks:
         return
-    # Only insert blank separators if the original list already had them between tasks.
     has_separator = any(
         isinstance(nodes[i], RawLine) and not nodes[i].raw.strip()
         and any(isinstance(nodes[j], TaskBlock) for j in range(i))
@@ -102,53 +96,34 @@ def sort_timed_nodes(nodes: list) -> None:
     nodes.extend(task_section)
 
 
-def sync_body_to_block(block: TaskBlock, task: Task) -> None:
-    """Rebuild block.nodes body lines from task.body, preserving existing child blocks."""
-    indent_step = get_indent_step()
-    child_blocks = {id(n.task): n for n in block.nodes if isinstance(n, TaskBlock)}
-    new_nodes = []
-    if task.body:
-        body_indent = (task.indent or '') + indent_step
-        for line in task.body.split('\n'):
-            stripped = line.strip()
-            new_nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
-    for child in task.children:
-        child_block = child_blocks.get(id(child)) or task_to_block(child)
-        child_block.refresh_header()
-        new_nodes.append(child_block)
-    block.nodes[:] = new_nodes
-
-
-def task_to_block(task: Task) -> TaskBlock:
-    """Build a TaskBlock tree from a Task (with body string and children list)."""
+def task_to_block(task: Task, body: str | None = None, subtask_blocks: list | None = None) -> TaskBlock:
+    """Build a TaskBlock from a Task, an optional body string, and optional child blocks."""
     indent_step = get_indent_step()
     nodes = []
-    if task.body:
+    if body:
         body_indent = (task.indent or '') + indent_step
-        for line in task.body.split('\n'):
+        for line in body.split('\n'):
             stripped = line.strip()
             nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
-    for child in task.children:
-        if not child.indent:
-            child.indent = (task.indent or '') + indent_step
-        nodes.append(task_to_block(child))
+    for child_block in (subtask_blocks or []):
+        if not child_block.task.indent:
+            child_block.task.indent = (task.indent or '') + indent_step
+        child_block.refresh_header()
+        nodes.append(child_block)
     return TaskBlock(task=task, header=task.to_line() + '\n', nodes=nodes)
 
 
 def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:
     src_cache = state.day(src_col)
     dst_cache = state.day(dst_col)
-    src_tasks = src_cache.task_list
-    if not src_tasks or not (0 <= cursor_row < len(src_tasks)):
+    src_blocks = src_cache.task_list
+    if not src_blocks or not (0 <= cursor_row < len(src_blocks)):
         return cursor_row
-    task = src_tasks.pop(cursor_row)
-    dst_cache.task_list.append(task)
-    block = src_cache.find_block(task)
-    if block:
-        remove_block(src_cache.nodes, block)
-        append_block(dst_cache.nodes, block)
-        if task.time:
-            sort_timed_nodes(dst_cache.nodes)
+    block = src_blocks[cursor_row]
+    remove_block(src_cache.nodes, block)
+    append_block(dst_cache.nodes, block)
+    if block.task.time:
+        sort_timed_nodes(dst_cache.nodes)
     return len(dst_cache.task_list) - 1
 
 
@@ -158,17 +133,22 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
     Returns (new_col, new_row, week_exit) where week_exit is 0 while still in
     the current week, or ±1 when the task crosses into an adjacent week.
     """
-    tasks = state.day(cursor_col).task_list
-    exp = week_expanded(tasks)
+    task_blocks = state.day(cursor_col).task_list
+    exp = week_expanded(task_blocks)
     if cursor_row >= len(exp):
         return cursor_col, cursor_row, 0
-    root = root_task(exp[cursor_row])
-    root_idx = tasks.index(root)
+    # Find depth-0 ancestor of the cursor position
+    root_row = cursor_row
+    while root_row > 0 and exp[root_row][1] > 0:
+        root_row -= 1
+    root_task_obj = exp[root_row][0]
+    root_block = next(b for b in task_blocks if b.task is root_task_obj)
+    root_idx = task_blocks.index(root_block)
     dst_col = cursor_col + direction
     if 0 <= dst_col <= 6:
         move_task_week(state, cursor_col, dst_col, root_idx)
         new_exp = week_expanded(state.day(dst_col).task_list)
-        new_row = next((i for i, t in enumerate(new_exp) if t is root), 0)
+        new_row = next((i for i, (t, _d) in enumerate(new_exp) if t is root_task_obj), 0)
         return dst_col, new_row, 0
     else:
         edge_day = state.week_days[0 if direction == -1 else 6]
@@ -176,12 +156,8 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
         ensure_day_loaded(state.cache, adj_day, state.directory)
         src_cache = state.day(cursor_col)
         adj_cache = state.cache[adj_day.isoformat()]
-        tasks.pop(root_idx)
-        block = src_cache.find_block(root)
-        if block:
-            remove_block(src_cache.nodes, block)
-            append_block(adj_cache.nodes, block)
-        adj_cache.task_list.append(root)
+        remove_block(src_cache.nodes, root_block)
+        append_block(adj_cache.nodes, root_block)
         adj_exp = week_expanded(adj_cache.task_list)
-        new_row = next((i for i, t in enumerate(adj_exp) if t is root), len(adj_exp) - 1)
+        new_row = next((i for i, (t, _d) in enumerate(adj_exp) if t is root_task_obj), len(adj_exp) - 1)
         return cursor_col, new_row, direction

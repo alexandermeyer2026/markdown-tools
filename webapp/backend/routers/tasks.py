@@ -1,3 +1,4 @@
+import textwrap
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -6,7 +7,7 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from parser.file_model import parse, populate_task_relations, TaskBlock, all_tasks
+from parser.file_model import RawLine, TaskBlock, parse, all_tasks
 from models.task import Task, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter
@@ -14,15 +15,29 @@ from os_utils.file_writer import FileWriter
 router = APIRouter()
 
 
-def _task_to_dict(task: Task) -> dict:
+def _find_block(nodes: list, task: Task) -> 'TaskBlock | None':
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            if node.task is task:
+                return node
+            result = _find_block(node.nodes, task)
+            if result is not None:
+                return result
+    return None
+
+
+def _task_to_dict(block: TaskBlock) -> dict:
+    task = block.task
+    body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
+    body_text = textwrap.dedent('\n'.join(body_lines)).strip() if body_lines else None
     return {
         "title": task.title,
         "status": task.status,
         "time": {"start": task.time.start, "end": task.time.end} if task.time else None,
         "line_number": task.line_number,
         "indent": task.indent,
-        "body": task.body,
-        "children": [_task_to_dict(c) for c in task.children],
+        "body": body_text or None,
+        "children": [_task_to_dict(n) for n in block.nodes if isinstance(n, TaskBlock)],
     }
 
 
@@ -42,11 +57,10 @@ def get_tasks(date: str, _user=Depends(get_current_user)):
     path = resolve_journal_file(date)
     try:
         nodes = parse(str(path))
-        populate_task_relations(nodes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse file: {e}")
-    top_level = [n.task for n in nodes if isinstance(n, TaskBlock)]
-    return {"date": date, "tasks": [_task_to_dict(t) for t in top_level]}
+    top_level_blocks = [n for n in nodes if isinstance(n, TaskBlock)]
+    return {"date": date, "tasks": [_task_to_dict(b) for b in top_level_blocks]}
 
 
 @router.post("/{date}")
@@ -95,7 +109,6 @@ def update_task_status(
 
     path = resolve_journal_file(date)
     nodes = parse(str(path))
-    populate_task_relations(nodes)
     task = next((t for t in all_tasks(nodes) if t.line_number == line_number), None)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found at that line")
@@ -107,4 +120,5 @@ def update_task_status(
     lines[line_number - 1] = task.to_line() + "\n"
     FileWriter.write_atomic(str(path), lines)
 
-    return {"message": "updated", "task": _task_to_dict(task)}
+    found_block = _find_block(nodes, task)
+    return {"message": "updated", "task": _task_to_dict(found_block) if found_block else {"title": task.title, "status": task.status}}

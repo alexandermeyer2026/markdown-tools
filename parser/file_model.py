@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import textwrap
 from dataclasses import dataclass, field
 from typing import Union
 
@@ -37,17 +36,6 @@ def serialize(nodes: list[Node]) -> str:
             parts.append(node.raw)
     return ''.join(parts)
 
-
-def populate_task_relations(nodes: list, parent_task=None) -> None:
-    """Walk the node tree, setting task.parent, task.children, and task.body."""
-    for node in nodes:
-        if isinstance(node, TaskBlock):
-            node.task.parent = parent_task
-            node.task.children = [n.task for n in node.nodes if isinstance(n, TaskBlock)]
-            body_lines = [n.raw.rstrip('\n') for n in node.nodes if isinstance(n, RawLine)]
-            body_text = textwrap.dedent('\n'.join(body_lines)).strip()
-            node.task.body = body_text if body_text else None
-            populate_task_relations(node.nodes, node.task)
 
 
 def all_tasks(nodes: list) -> list[Task]:

@@ -58,9 +58,19 @@ class FileWriter:
     @staticmethod
     def sort_timed_tasks(file_path: str, timed_tasks: list[Task], all_tasks: list[Task]) -> None:
         """Sort timed tasks by start time in place; only tasks sharing the same parent are sorted together."""
+        all_sorted_by_line = sorted(all_tasks, key=lambda t: t.line_number)
+
+        def _parent_key(task: Task) -> int:
+            depth = len(task.indent)
+            idx = next((i for i, t in enumerate(all_sorted_by_line) if t is task), -1)
+            for i in range(idx - 1, -1, -1):
+                if len(all_sorted_by_line[i].indent) < depth:
+                    return id(all_sorted_by_line[i])
+            return -1
+
         groups: dict[int, list[Task]] = {}
         for task in timed_tasks:
-            groups.setdefault(id(task.parent), []).append(task)
+            groups.setdefault(_parent_key(task), []).append(task)
 
         all_sorted = sorted(all_tasks, key=lambda t: t.line_number)
 

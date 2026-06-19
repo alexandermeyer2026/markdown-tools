@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from parser.file_model import parse, populate_task_relations, all_tasks
+from parser.file_model import TaskBlock, parse
 from tools.journal_tools.rendering import get_time_slot
 from tools.journal_tools.timeline_tool import TimelineTool
 
@@ -99,11 +99,12 @@ class TestIntegration(unittest.TestCase):
     )
 
     def setUp(self):
-        nodes = parse(FIXTURE); populate_task_relations(nodes); tasks = all_tasks(nodes)
+        nodes = parse(FIXTURE)
+        blocks = [n for n in nodes if isinstance(n, TaskBlock)]
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 80})()):
             with redirect_stdout(buf):
-                TimelineTool.render_timeline(tasks, FIXTURE_DATE)
+                TimelineTool.render_timeline(blocks, FIXTURE_DATE)
         self.output = strip_ansi(buf.getvalue())
 
     def test_complete_output(self):
@@ -131,11 +132,12 @@ class TestIntegrationHalfHourStep(unittest.TestCase):
     )
 
     def setUp(self):
-        nodes = parse(FIXTURE); populate_task_relations(nodes); tasks = all_tasks(nodes)
+        nodes = parse(FIXTURE)
+        blocks = [n for n in nodes if isinstance(n, TaskBlock)]
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 50})()):
             with redirect_stdout(buf):
-                TimelineTool.render_timeline(tasks, FIXTURE_DATE)
+                TimelineTool.render_timeline(blocks, FIXTURE_DATE)
         self.output = strip_ansi(buf.getvalue())
 
     def test_complete_output(self):
@@ -157,11 +159,12 @@ class TestIntegrationHourStep(unittest.TestCase):
     )
 
     def setUp(self):
-        nodes = parse(FIXTURE); populate_task_relations(nodes); tasks = all_tasks(nodes)
+        nodes = parse(FIXTURE)
+        blocks = [n for n in nodes if isinstance(n, TaskBlock)]
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 20})()):
             with redirect_stdout(buf):
-                TimelineTool.render_timeline(tasks, FIXTURE_DATE)
+                TimelineTool.render_timeline(blocks, FIXTURE_DATE)
         self.output = strip_ansi(buf.getvalue())
 
     def test_complete_output(self):

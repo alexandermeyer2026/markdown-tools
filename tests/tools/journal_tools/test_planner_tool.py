@@ -12,7 +12,7 @@ import pytest
 
 from models import Task, TaskTime, minutes_to_time
 from os_utils import FileFinder, resolve_date
-from parser.file_model import serialize
+from parser.file_model import RawLine, TaskBlock, serialize
 from tools.journal_tools.planner import WeekState, DayCache
 from tools.journal_tools.planner.app import PlannerApp
 from tools.journal_tools.planner.state import PlannerState
@@ -33,39 +33,38 @@ FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', '
 
 class TestWeekCacheChanges(unittest.TestCase):
 
-    def _make_cache(self, tasks):
-        tl = [t for t in tasks if t.parent is None]
-        nodes = [task_to_block(t) for t in tl]
+    def _make_cache(self, blocks):
+        nodes = list(blocks)
         return {
             '2024-01-15': DayCache(
                 file_path=None,
                 nodes=nodes,
                 original_content=serialize(nodes),
-                task_list=tl,
             )
         }
 
     def test_no_changes_returns_false(self):
         child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
-        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        child.parent = parent
-        cache = self._make_cache([parent, child])
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        child_block = task_to_block(child)
+        parent_block = task_to_block(parent, subtask_blocks=[child_block])
+        cache = self._make_cache([parent_block])
         self.assertFalse(cache_has_changes(cache))
 
     def test_parent_status_change_detected(self):
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
-        cache = self._make_cache([parent])
+        parent_block = task_to_block(parent)
+        cache = self._make_cache([parent_block])
         parent.status = 'done'
         cache['2024-01-15'].find_block(parent).refresh_header()
         self.assertTrue(cache_has_changes(cache))
 
     def test_subtask_status_change_detected(self):
         child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
-        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        child.parent = parent
-        cache = self._make_cache([parent, child])
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        child_block = task_to_block(child)
+        parent_block = task_to_block(parent, subtask_blocks=[child_block])
+        cache = self._make_cache([parent_block])
         child.status = 'done'
         cache['2024-01-15'].find_block(child).refresh_header()
         self.assertTrue(cache_has_changes(cache))
@@ -87,8 +86,8 @@ class TestPlannerState(unittest.TestCase):
         state = PlannerState(self.tmpdir)
         day = state.load_day(self.date)
         self.assertEqual(len(day.task_list), 2)
-        self.assertEqual(day.task_list[0].title, 'Task A')
-        self.assertEqual(day.task_list[1].title, 'Task B')
+        self.assertEqual(day.task_list[0].task.title, 'Task A')
+        self.assertEqual(day.task_list[1].task.title, 'Task B')
 
     def test_load_day_is_idempotent(self):
         state = PlannerState(self.tmpdir)
@@ -105,20 +104,21 @@ class TestPlannerState(unittest.TestCase):
     def test_task_body_populated_on_load(self):
         state = PlannerState(self.tmpdir)
         day = state.load_day(self.date)
-        task_a = day.task_list[0]
-        self.assertIsNotNone(task_a.body)
-        self.assertIn('Some notes', task_a.body)
+        block_a = day.task_list[0]
+        raw_texts = [n.raw for n in block_a.nodes if isinstance(n, RawLine)]
+        self.assertTrue(raw_texts)
+        self.assertTrue(any('Some notes' in r for r in raw_texts))
 
     def test_reload_discards_in_memory_mutations(self):
         state = PlannerState(self.tmpdir)
         key = self.date.isoformat()
         state.load_day(self.date)
         new = Task(title='Ephemeral', status='todo', time=None, line_number=-1, indent='')
-        state.days[key].task_list.append(new)
+        state.days[key].nodes.append(task_to_block(new))
         self.assertEqual(len(state.days[key].task_list), 3)
         state.reload_day_by_key(key)
         self.assertEqual(len(state.days[key].task_list), 2)
-        self.assertNotIn('Ephemeral', [t.title for t in state.days[key].task_list])
+        self.assertNotIn('Ephemeral', [b.task.title for b in state.days[key].task_list])
 
     def test_reload_refreshes_original_content(self):
         state = PlannerState(self.tmpdir)
@@ -131,12 +131,15 @@ class TestPlannerState(unittest.TestCase):
         self.assertGreater(len(state.days[key].original_content), len_before)
 
     def test_task_body_dedented_on_load(self):
-        # File has "    Some notes" (raw indented); task.body must be fully dedented
+        # File has "    Some notes" (raw indented); block.nodes RawLines must dedent
         # so TaskFormScreen shows unindented text and round-trip doesn't mark dirty.
+        import textwrap
         state = PlannerState(self.tmpdir)
         day = state.load_day(self.date)
-        task_a = day.task_list[0]
-        self.assertEqual(task_a.body, 'Some notes')
+        block_a = day.task_list[0]
+        body_lines = [n.raw.rstrip('\n') for n in block_a.nodes if isinstance(n, RawLine)]
+        body_str = textwrap.dedent('\n'.join(body_lines)).strip()
+        self.assertEqual(body_str, 'Some notes')
 
 
 
@@ -305,66 +308,66 @@ class TestDayGridInteraction(unittest.TestCase):
 
     def test_shift_right(self):
         timed, _ = asyncio.run(self._inspect(['l']))
-        self.assertEqual(timed[0].time.start, minutes_to_time(540 + self.STEP_M))
-        self.assertEqual(timed[0].time.end,   minutes_to_time(600 + self.STEP_M))
+        self.assertEqual(timed[0].task.time.start, minutes_to_time(540 + self.STEP_M))
+        self.assertEqual(timed[0].task.time.end,   minutes_to_time(600 + self.STEP_M))
 
     def test_shift_left(self):
         timed, _ = asyncio.run(self._inspect(['h']))
-        self.assertEqual(timed[0].time.start, minutes_to_time(540 - self.STEP_M))
-        self.assertEqual(timed[0].time.end,   minutes_to_time(600 - self.STEP_M))
+        self.assertEqual(timed[0].task.time.start, minutes_to_time(540 - self.STEP_M))
+        self.assertEqual(timed[0].task.time.end,   minutes_to_time(600 - self.STEP_M))
 
     def test_shift_clamps_at_zero(self):
         presses = 540 // self.STEP_M + 5
         timed, _ = asyncio.run(self._inspect(['h'] * presses))
-        self.assertEqual(timed[0].time.start, '0:00')
-        self.assertEqual(timed[0].time.end,   minutes_to_time(60))
+        self.assertEqual(timed[0].task.time.start, '0:00')
+        self.assertEqual(timed[0].task.time.end,   minutes_to_time(60))
 
     def test_extend_end_time(self):
         timed, _ = asyncio.run(self._inspect(['L']))
-        self.assertEqual(timed[0].time.start, '9:00')
-        self.assertEqual(timed[0].time.end,   minutes_to_time(600 + self.STEP_M))
+        self.assertEqual(timed[0].task.time.start, '9:00')
+        self.assertEqual(timed[0].task.time.end,   minutes_to_time(600 + self.STEP_M))
 
     def test_shrink_end_time(self):
         timed, _ = asyncio.run(self._inspect(['H']))
-        self.assertEqual(timed[0].time.start, '9:00')
-        self.assertEqual(timed[0].time.end,   minutes_to_time(600 - self.STEP_M))
+        self.assertEqual(timed[0].task.time.start, '9:00')
+        self.assertEqual(timed[0].task.time.end,   minutes_to_time(600 - self.STEP_M))
 
     def test_shrink_fuses_at_minimum_duration(self):
         # Meeting is 9:00-10:00 = 60 min; 4 presses shrink end to == start → fuse
         presses = 60 // self.STEP_M
         timed, _ = asyncio.run(self._inspect(['H'] * presses))
-        self.assertEqual(timed[0].time.start, '9:00')
-        self.assertIsNone(timed[0].time.end)
+        self.assertEqual(timed[0].task.time.start, '9:00')
+        self.assertIsNone(timed[0].task.time.end)
 
     def test_extend_creates_end_time_for_start_only_task(self):
         with open(self.path, 'w', encoding='utf-8') as f:
             f.write("- [ ] 9:00 Standup\n")
         timed, _ = asyncio.run(self._inspect(['L']))
-        self.assertEqual(timed[0].time.start, '9:00')
-        self.assertEqual(timed[0].time.end,   minutes_to_time(540 + self.STEP_M))
+        self.assertEqual(timed[0].task.time.start, '9:00')
+        self.assertEqual(timed[0].task.time.end,   minutes_to_time(540 + self.STEP_M))
 
     def test_untimed_task_moves_to_noon(self):
         # j to Buy milk (untimed), l schedules it at noon
         timed, untimed = asyncio.run(self._inspect(['j', 'l']))
-        timed_titles = [t.title for t in timed]
+        timed_titles = [b.task.title for b in timed]
         self.assertIn('Buy milk', timed_titles)
-        milk = next(t for t in timed if t.title == 'Buy milk')
-        self.assertEqual(milk.time.start, '12:00')
-        self.assertIsNone(milk.time.end)
+        milk = next(b for b in timed if b.task.title == 'Buy milk')
+        self.assertEqual(milk.task.time.start, '12:00')
+        self.assertIsNone(milk.task.time.end)
 
     def test_extend_creates_end_time_for_untimed_task(self):
         # j to Buy milk, l schedules at noon, L adds end time
         timed, _ = asyncio.run(self._inspect(['j', 'l', 'L']))
-        milk = next(t for t in timed if t.title == 'Buy milk')
-        self.assertEqual(milk.time.start, '12:00')
-        self.assertEqual(milk.time.end, minutes_to_time(720 + self.STEP_M))
+        milk = next(b for b in timed if b.task.title == 'Buy milk')
+        self.assertEqual(milk.task.time.start, '12:00')
+        self.assertEqual(milk.task.time.end, minutes_to_time(720 + self.STEP_M))
 
     # ── Remove time ───────────────────────────────────────────────────────────
 
     def test_remove_time_moves_task_to_untimed(self):
         timed, untimed = asyncio.run(self._inspect(['r']))
-        self.assertNotIn('Meeting', [t.title for t in timed])
-        self.assertIn('Meeting', [t.title for t in untimed])
+        self.assertNotIn('Meeting', [b.task.title for b in timed])
+        self.assertIn('Meeting', [b.task.title for b in untimed])
 
     def test_remove_time_on_untimed_is_noop(self):
         timed_before, untimed_before = asyncio.run(self._inspect([]))
@@ -394,8 +397,8 @@ class TestDayGridInteraction(unittest.TestCase):
         # j moves cursor to Buy milk (untimed), D deletes it
         # (integration tests only cover timed deletion, so this fills the gap)
         timed, untimed = asyncio.run(self._inspect(['j', 'D']))
-        self.assertEqual([t.title for t in timed], ['Meeting'])
-        self.assertEqual([t.title for t in untimed], [])
+        self.assertEqual([b.task.title for b in timed], ['Meeting'])
+        self.assertEqual([b.task.title for b in untimed], [])
 
     def test_delete_does_not_persist_without_save(self):
         with open(self.path) as f:
@@ -616,8 +619,9 @@ class TestWeekGridInteraction(unittest.TestCase):
         state, col, row = asyncio.run(self._inspect(['j', 'H']))
         self.assertEqual(col, 1)
         self.assertEqual(len(state.day(1).task_list), 1)
-        self.assertEqual(state.day(1).task_list[0].title, 'My task')
-        self.assertEqual(len(state.day(1).task_list[0].children), 1)
+        self.assertEqual(state.day(1).task_list[0].task.title, 'My task')
+        child_blocks = [n for n in state.day(1).task_list[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(len(child_blocks), 1)
         self.assertEqual(len(state.day(2).task_list), 0)
 
     # ── Deletion ──────────────────────────────────────────────────────────────
@@ -634,14 +638,14 @@ class TestWeekGridInteraction(unittest.TestCase):
         self.assertEqual(col, 2)
         self.assertEqual(row, 0)
         self.assertEqual(len(state.day(2).task_list), 1)
-        self.assertEqual(state.day(2).task_list[0].title, 'My task')
-        self.assertEqual(state.day(2).task_list[0].children, [])
+        self.assertEqual(state.day(2).task_list[0].task.title, 'My task')
+        self.assertEqual([n for n in state.day(2).task_list[0].nodes if isinstance(n, TaskBlock)], [])
 
     def test_D_then_status_change_on_remaining(self):
         # j → Sub, D deletes Sub, cursor clamps to row=0 (My task), i → in progress
         state, col, row = asyncio.run(self._inspect(['j', 'D', 'i']))
-        self.assertEqual(state.day(2).task_list[0].status, 'in progress')
-        self.assertEqual(state.day(2).task_list[0].children, [])
+        self.assertEqual(state.day(2).task_list[0].task.status, 'in progress')
+        self.assertEqual([n for n in state.day(2).task_list[0].nodes if isinstance(n, TaskBlock)], [])
 
     def test_carry_skips_started_subtasks(self):
         # Task with a todo sub and a started sub; > should carry only the todo sub.
@@ -649,12 +653,14 @@ class TestWeekGridInteraction(unittest.TestCase):
             f.write("- [ ] My task\n  - [ ] Todo sub\n  - [~] Started sub\n")
         state, col, row = asyncio.run(self._inspect(['>']))
         # Started sub stays on Wednesday with the parent
-        self.assertEqual([c.title for c in state.day(2).task_list[0].children], ['Started sub'])
+        wed_children = [n for n in state.day(2).task_list[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual([b.task.title for b in wed_children], ['Started sub'])
         # Todo sub is carried to Thursday inside a new wrapper task
         thu = state.day(3).task_list
         self.assertEqual(len(thu), 1)
-        self.assertEqual(thu[0].title, 'My task')
-        self.assertEqual([c.title for c in thu[0].children], ['Todo sub'])
+        self.assertEqual(thu[0].task.title, 'My task')
+        thu_children = [n for n in thu[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual([b.task.title for b in thu_children], ['Todo sub'])
 
     def test_carry_preserves_subtask_body_in_memory(self):
         # Subtask with body text; body should be present on the carried child in memory.
@@ -663,8 +669,10 @@ class TestWeekGridInteraction(unittest.TestCase):
         state, col, row = asyncio.run(self._inspect(['>']))
         thu = state.day(3).task_list
         self.assertEqual(len(thu), 1)
-        self.assertEqual(len(thu[0].children), 1)
-        self.assertIn('Sub notes', thu[0].children[0].body)
+        thu_children = [n for n in thu[0].nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(len(thu_children), 1)
+        sub_raw = ''.join(n.raw for n in thu_children[0].nodes if isinstance(n, RawLine))
+        self.assertIn('Sub notes', sub_raw)
 
 
 
@@ -762,6 +770,7 @@ class TestTaskFormScreen(unittest.TestCase):
     def test_edit_mode_prefills_title_and_status(self):
         from textual.widgets import Input, Select
         task = Task(title="Old task", status="done", time=None, line_number=1, indent="")
+        block = task_to_block(task)
         inspected = {}
 
         async def interact(pilot):
@@ -770,7 +779,7 @@ class TestTaskFormScreen(unittest.TestCase):
             inspected["status"] = screen.query_one("#status", Select).value
             await pilot.press("escape")
 
-        asyncio.run(self._run_form(task=task, interact=interact))
+        asyncio.run(self._run_form(task=block, interact=interact))
         self.assertEqual(inspected["title"],  "Old task")
         self.assertEqual(inspected["status"], "done")
 
@@ -778,6 +787,7 @@ class TestTaskFormScreen(unittest.TestCase):
         from textual.widgets import Input
         task = Task(title="Meeting", status="todo",
                     time=TaskTime(start="9:00", end="10:00"), line_number=1, indent="")
+        block = task_to_block(task)
         inspected = {}
 
         async def interact(pilot):
@@ -786,7 +796,7 @@ class TestTaskFormScreen(unittest.TestCase):
             inspected["time_end"]   = screen.query_one("#time_end",   Input).value
             await pilot.press("escape")
 
-        asyncio.run(self._run_form(task=task, interact=interact))
+        asyncio.run(self._run_form(task=block, interact=interact))
         self.assertEqual(inspected["time_start"], "9:00")
         self.assertEqual(inspected["time_end"],   "10:00")
 
@@ -817,15 +827,19 @@ class TestTaskFormScreen(unittest.TestCase):
 
     def test_edit_mode_prefills_body_dedented(self):
         from textual.widgets import TextArea
-        task = Task(title='Task', status='todo', time=None, line_number=1, indent='',
-                    body='    Indented note\n    Another line')
+        task = Task(title='Task', status='todo', time=None, line_number=1, indent='')
+        block = TaskBlock(
+            task=task,
+            header=task.to_line() + '\n',
+            nodes=[RawLine('    Indented note\n'), RawLine('    Another line\n')],
+        )
         inspected = {}
 
         async def interact(pilot):
             inspected['body'] = pilot.app.screen.query_one('#body', TextArea).text
             await pilot.press('escape')
 
-        asyncio.run(self._run_form(task=task, interact=interact))
+        asyncio.run(self._run_form(task=block, interact=interact))
         self.assertIn('Indented note', inspected['body'])
         self.assertNotIn('    Indented note', inspected['body'])
         self.assertIn('Another line', inspected['body'])
@@ -853,8 +867,8 @@ class TestTaskFormScreen(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r.title, 'Parent')
         self.assertEqual(len(r.subtasks), 1)
-        self.assertEqual(r.subtasks[0].title, 'Child')
-        self.assertEqual(r.subtasks[0].status, 'todo')
+        self.assertEqual(r.subtasks[0].task.title, 'Child')
+        self.assertEqual(r.subtasks[0].task.status, 'todo')
 
     def test_nested_subtask_in_result(self):
         """Sub-subtask created inside a subtask's form appears in the grandchild slot."""
@@ -889,9 +903,10 @@ class TestTaskFormScreen(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(len(r.subtasks), 1)
         child = r.subtasks[0]
-        self.assertEqual(child.title, 'Child')
-        self.assertEqual(len(child.children), 1)
-        self.assertEqual(child.children[0].title, 'Grandchild')
+        self.assertEqual(child.task.title, 'Child')
+        child_children = [n for n in child.nodes if isinstance(n, TaskBlock)]
+        self.assertEqual(len(child_children), 1)
+        self.assertEqual(child_children[0].task.title, 'Grandchild')
 
     def test_cancel_subtask_not_added(self):
         from textual.widgets import Input
@@ -917,10 +932,10 @@ class TestTaskFormScreen(unittest.TestCase):
         from textual.widgets import Input
         from tools.journal_tools.planner.task_form_screen import SubtaskList
 
-        child = Task(title='Original', status='todo', time=None, line_number=-1, indent='  ')
-        task = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                    children=[child])
-        child.parent = task
+        child_task = Task(title='Original', status='todo', time=None, line_number=-1, indent='  ')
+        parent_task = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        child_block = task_to_block(child_task)
+        parent_block = task_to_block(parent_task, subtask_blocks=[child_block])
 
         async def interact(pilot):
             screen = pilot.app.screen
@@ -933,19 +948,19 @@ class TestTaskFormScreen(unittest.TestCase):
             await pilot.pause()
             await pilot.press('ctrl+s')
 
-        dismissed = asyncio.run(self._run_form(task=task, interact=interact))
+        dismissed = asyncio.run(self._run_form(task=parent_block, interact=interact))
         r = dismissed[0]
         self.assertIsNotNone(r)
         self.assertEqual(len(r.subtasks), 1)
-        self.assertEqual(r.subtasks[0].title, 'Updated')
+        self.assertEqual(r.subtasks[0].task.title, 'Updated')
 
     def test_delete_subtask(self):
         from tools.journal_tools.planner.task_form_screen import SubtaskList
 
-        child = Task(title='ToDelete', status='todo', time=None, line_number=-1, indent='  ')
-        task = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                    children=[child])
-        child.parent = task
+        child_task = Task(title='ToDelete', status='todo', time=None, line_number=-1, indent='  ')
+        parent_task = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        child_block = task_to_block(child_task)
+        parent_block = task_to_block(parent_task, subtask_blocks=[child_block])
 
         async def interact(pilot):
             pilot.app.screen.query_one(SubtaskList).focus()
@@ -956,7 +971,7 @@ class TestTaskFormScreen(unittest.TestCase):
             await pilot.pause()
             await pilot.press('ctrl+s')
 
-        dismissed = asyncio.run(self._run_form(task=task, interact=interact))
+        dismissed = asyncio.run(self._run_form(task=parent_block, interact=interact))
         r = dismissed[0]
         self.assertIsNotNone(r)
         self.assertEqual(r.subtasks, [])
@@ -1089,24 +1104,18 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
         with open(os.path.join(self.tmpdir, f'{date}.md'), encoding='utf-8') as f:
             return f.read()
 
-    def _delete_and_save(self, state, task, date=datetime.date(2024, 3, 15)):
+    def _delete_and_save(self, state, block, date=datetime.date(2024, 3, 15)):
         from tools.journal_tools.planner.weekly import save_cache
         day = state.days[date.isoformat()]
-        if task.parent is None:
-            day.task_list.remove(task)
-        else:
-            task.parent.children.remove(task)
-        block = day.find_block(task)
-        if block:
-            remove_block(day.nodes, block)
+        remove_block(day.nodes, block)
         save_cache(state.days, self.tmpdir)
 
     def test_delete_root_task_preserves_blank_line(self):
         self._write("- [ ] Task A\n\n- [ ] Task B\n")
         state = PlannerState(self.tmpdir)
         state.load_day(datetime.date(2024, 3, 15))
-        task_a = state.days['2024-03-15'].task_list[0]
-        self._delete_and_save(state, task_a)
+        block_a = state.days['2024-03-15'].task_list[0]
+        self._delete_and_save(state, block_a)
         content = self._read()
         self.assertNotIn('Task A', content)
         self.assertIn('Task B', content)
@@ -1120,9 +1129,9 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
         self._write("- [ ] Parent\n    - [ ] Sub\n\n- [ ] Task B\n")
         state = PlannerState(self.tmpdir)
         state.load_day(datetime.date(2024, 3, 15))
-        parent = state.days['2024-03-15'].task_list[0]
-        sub = parent.children[0]
-        self._delete_and_save(state, sub)
+        parent_block = state.days['2024-03-15'].task_list[0]
+        sub_block = [n for n in parent_block.nodes if isinstance(n, TaskBlock)][0]
+        self._delete_and_save(state, sub_block)
         content = self._read()
         self.assertNotIn('Sub', content)
         self.assertIn('Parent', content)
@@ -1164,15 +1173,11 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
         state.load_day(date_b)
         cache_a = state.days[date_a.isoformat()]
         cache_b = state.days[date_b.isoformat()]
-        task_a = cache_a.task_list[2]  # 10:00 Task A
-        block_a = cache_a.find_block(task_a)
-        cache_a.task_list.remove(task_a)
-        cache_b.task_list.append(task_a)
-        if block_a:
-            remove_block(cache_a.nodes, block_a)
-            append_block(cache_b.nodes, block_a)
-            if task_a.time:
-                sort_timed_nodes(cache_b.nodes)
+        block_a = cache_a.task_list[2]  # TaskBlock for 10:00 Task A
+        remove_block(cache_a.nodes, block_a)
+        append_block(cache_b.nodes, block_a)
+        if block_a.task.time:
+            sort_timed_nodes(cache_b.nodes)
         save_cache(state.days, self.tmpdir)
         return state, save_cache
 

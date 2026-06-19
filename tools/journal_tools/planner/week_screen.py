@@ -13,7 +13,7 @@ from models import Task, TaskTime
 from parser.file_model import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import PlannerState, WeekState
-from .utils import week_expanded, root_task, fix_parent_refs
+from .utils import week_expanded
 from .weekly import (
     DAY_NAMES,
     append_block,
@@ -21,7 +21,6 @@ from .weekly import (
     remove_block,
     save_cache,
     shift_task,
-    sync_body_to_block,
     task_to_block,
 )
 
@@ -120,7 +119,7 @@ class WeekGrid(Widget, can_focus=True):
         lines.append(header)
         lines.append(Text(_MARGIN + ("─" * (col_width - 1) + " ") * 7))
 
-        # Task rows
+        # Task rows — week_expanded returns list[tuple[Task, int]]
         expanded = [week_expanded(state.day(i).task_list) for i in range(7)]
         max_rows = max((len(e) for e in expanded), default=0)
         max_rows = max(max_rows, 1)
@@ -131,7 +130,8 @@ class WeekGrid(Widget, can_focus=True):
                 exp = expanded[col_idx]
                 is_sel = col_idx == self.cursor_col and row == self.cursor_row
                 if row < len(exp):
-                    line.append_text(self._week_cell(exp[row], col_width, is_sel))
+                    task, depth = exp[row]
+                    line.append_text(self._week_cell(task, depth, col_width, is_sel))
                 elif is_sel:
                     line.append(" " * col_width, style="reverse")
                 else:
@@ -147,22 +147,11 @@ class WeekGrid(Widget, can_focus=True):
 
         return Group(*lines)
 
-    def _week_cell(self, task: Task | None, col_width: int, is_selected: bool) -> Text:
-        if task is None:
-            t = Text(" " * col_width)
-            if is_selected:
-                t.stylize("reverse")
-            return t
-
+    def _week_cell(self, task: Task, depth: int, col_width: int, is_selected: bool) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
         style = STATUS_STYLES.get(task.status, "bright_black")
 
-        if task.parent is not None:
-            depth = 0
-            p = task.parent
-            while p is not None:
-                depth += 1
-                p = p.parent
+        if depth > 0:
             indent = "  " * depth
             title_max = max(col_width - 4 - depth * 2, 1)
             title_str = task.title[:title_max].ljust(title_max)
@@ -193,7 +182,7 @@ class WeekGrid(Widget, can_focus=True):
             return None
         exp = week_expanded(self._state.day(self.cursor_col).task_list)
         if self.cursor_row < len(exp):
-            return exp[self.cursor_row]
+            return exp[self.cursor_row][0]
         return None
 
     def _selected_day(self) -> datetime.date:
@@ -297,39 +286,30 @@ class WeekGrid(Widget, can_focus=True):
         exp = week_expanded(self._state.day(self.cursor_col).task_list)
         if self.cursor_row >= len(exp):
             return
-        task = exp[self.cursor_row]
-        if task.parent is not None:
-            return
-        unfinished = [c for c in task.children if c.status not in ("done", "failed", "started")]
-        if not unfinished:
+        task, depth = exp[self.cursor_row]
+        if depth > 0:
             return
 
-        # Remove unfinished subtask blocks from the source day's node tree
         src_cache = self._state.day(self.cursor_col)
         src_block = src_cache.find_block(task)
-        unfinished_blocks = []
-        if src_block:
-            unfinished_blocks = [src_cache.find_block(c) for c in unfinished]
-            unfinished_blocks = [b for b in unfinished_blocks if b is not None]
-            for ub in unfinished_blocks:
-                if ub in src_block.nodes:
-                    src_block.nodes.remove(ub)
+        if src_block is None:
+            return
 
-        task.children = [c for c in task.children if c.status in ("done", "failed", "started")]
+        child_blocks = [n for n in src_block.nodes if isinstance(n, TaskBlock)]
+        unfinished_blocks = [b for b in child_blocks if b.task.status not in ("done", "failed", "started")]
+        if not unfinished_blocks:
+            return
+
+        # Remove unfinished child blocks from src_block.nodes
+        unfinished_ids = {id(b) for b in unfinished_blocks}
+        src_block.nodes[:] = [
+            n for n in src_block.nodes
+            if not (isinstance(n, TaskBlock) and id(n) in unfinished_ids)
+        ]
 
         tomorrow = self._state.week_days[self.cursor_col] + datetime.timedelta(days=1)
         self._planner.load_day(tomorrow)
-        new_task = Task(
-            title=task.title,
-            status="todo",
-            time=None,
-            line_number=-1,
-            indent="",
-            children=list(unfinished),
-        )
-        for child in unfinished:
-            child.parent = new_task
-
+        new_task = Task(title=task.title, status="todo", time=None, line_number=-1, indent="")
         new_block = TaskBlock(
             task=new_task,
             header=new_task.to_line() + '\n',
@@ -337,7 +317,6 @@ class WeekGrid(Widget, can_focus=True):
         )
         dst_cache = self._planner.days[tomorrow.isoformat()]
         append_block(dst_cache.nodes, new_block)
-        dst_cache.task_list.append(new_task)
         self.refresh()
 
     def action_delete_task(self) -> None:
@@ -346,10 +325,6 @@ class WeekGrid(Widget, can_focus=True):
             return
         day_key = self._selected_day().isoformat()
         day_cache = self._planner.days[day_key]
-        if task.parent is None:
-            day_cache.task_list.remove(task)
-        else:
-            task.parent.children.remove(task)
         block = day_cache.find_block(task)
         if block:
             remove_block(day_cache.nodes, block)
@@ -407,12 +382,15 @@ class WeekGrid(Widget, can_focus=True):
     def _edit_task(self, task: Task) -> None:
         from .task_form_screen import TaskFormScreen, TaskFormResult
         day_key = self._selected_day().isoformat()
+        day_cache = self._planner.days[day_key]
+        block = day_cache.find_block(task)
+        if block is None:
+            return
 
         def on_form_result(result: TaskFormResult | None) -> None:
             if result is not None:
                 task.title = result.title
                 task.status = result.status
-                task.body = result.body
                 if result.time_start:
                     task.time = TaskTime(
                         start=result.time_start,
@@ -420,14 +398,12 @@ class WeekGrid(Widget, can_focus=True):
                     )
                 else:
                     task.time = None
-                fix_parent_refs(task.children, task)
-                block = self._planner.days[day_key].find_block(task)
-                if block:
-                    block.refresh_header()
-                    sync_body_to_block(block, task)
+                block.refresh_header()
+                rebuilt = task_to_block(task, result.body, result.subtasks)
+                block.nodes[:] = rebuilt.nodes
             self.call_after_refresh(self.refresh)
 
-        self.app.push_screen(TaskFormScreen(task), on_form_result)
+        self.app.push_screen(TaskFormScreen(block), on_form_result)
 
     def action_new_task(self) -> None:
         from .task_form_screen import TaskFormScreen, TaskFormResult
@@ -452,14 +428,10 @@ class WeekGrid(Widget, can_focus=True):
                 time=time,
                 line_number=-1,
                 indent="",
-                body=result.body,
-                children=result.subtasks,
             )
-            fix_parent_refs(new_task.children, new_task)
-            new_block = task_to_block(new_task)
+            new_block = task_to_block(new_task, result.body, result.subtasks)
             day_cache = self._planner.days[day_key]
             append_block(day_cache.nodes, new_block)
-            day_cache.task_list.append(new_task)
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(), on_form_result)

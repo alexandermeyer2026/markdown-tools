@@ -13,8 +13,9 @@ from textual.widgets import Button, Input, Label, Select, TextArea
 
 from config import get_indent_step
 from models import Task, TaskTime
+from parser.file_model import RawLine, TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS
-from .utils import fix_parent_refs, flatten_tasks
+from .weekly import task_to_block
 
 
 @dataclass
@@ -24,7 +25,7 @@ class TaskFormResult:
     time_start: str | None
     time_end: str | None
     body: str | None
-    subtasks: list[Task] = field(default_factory=list)
+    subtasks: list = field(default_factory=list)  # list[TaskBlock]
 
 
 _STATUS_OPTIONS: list[tuple[str, str]] = [
@@ -34,6 +35,16 @@ _STATUS_OPTIONS: list[tuple[str, str]] = [
     ("✓  Done",        "done"),
     ("✗  Failed",      "failed"),
 ]
+
+
+def _flat_blocks(blocks: list) -> list:
+    """DFS flat list of all TaskBlocks."""
+    result = []
+    for block in blocks:
+        if isinstance(block, TaskBlock):
+            result.append(block)
+            result.extend(_flat_blocks([n for n in block.nodes if isinstance(n, TaskBlock)]))
+    return result
 
 
 class SubtaskList(Widget, can_focus=True):
@@ -47,13 +58,13 @@ class SubtaskList(Widget, can_focus=True):
 
     cursor_idx: reactive[int] = reactive(0, repaint=True)
 
-    def __init__(self, task: Task | None, children: list[Task]) -> None:
+    def __init__(self, parent_task: Task | None, children: list) -> None:
         super().__init__()
-        self._source_task = task
-        self._children = children
+        self._parent_task = parent_task
+        self._children = children  # list[TaskBlock]
 
-    def _flat(self) -> list[Task]:
-        return flatten_tasks(self._children)
+    def _flat(self) -> list:
+        return _flat_blocks(self._children)
 
     def get_content_height(self, container_size, viewport_size, width: int) -> int:
         return max(len(self._flat()), 1)
@@ -62,23 +73,24 @@ class SubtaskList(Widget, can_focus=True):
         flat = self._flat()
         if not flat:
             return Text("  press n to add", style="dim")
-        cursor_task = flat[min(self.cursor_idx, len(flat) - 1)]
-        lines = self._render_children(self._children, depth=0, cursor_task=cursor_task)
+        cursor_block = flat[min(self.cursor_idx, len(flat) - 1)]
+        lines = self._render_children(self._children, depth=0, cursor_block=cursor_block)
         return Group(*lines)
 
     def _render_children(
-        self, tasks: list[Task], depth: int, cursor_task: Task | None
+        self, blocks: list, depth: int, cursor_block
     ) -> list[Text]:
         lines = []
-        for task in tasks:
-            icon = STATUS_ICONS.get(task.status, "?")
+        for block in blocks:
+            icon = STATUS_ICONS.get(block.task.status, "?")
             indent = "  " * depth
-            is_sel = task is cursor_task and self.has_focus
-            t = Text(indent + icon + " " + task.title)
+            is_sel = block is cursor_block and self.has_focus
+            t = Text(indent + icon + " " + block.task.title)
             if is_sel:
                 t.stylize("reverse")
             lines.append(t)
-            lines.extend(self._render_children(task.children, depth + 1, cursor_task))
+            child_blocks = [n for n in block.nodes if isinstance(n, TaskBlock)]
+            lines.extend(self._render_children(child_blocks, depth + 1, cursor_block))
         return lines
 
     def action_cursor_down(self) -> None:
@@ -100,22 +112,19 @@ class SubtaskList(Widget, can_focus=True):
                     start=result.time_start,
                     end=result.time_end if result.time_end else None,
                 )
-            parent_indent = self._source_task.indent if self._source_task else ""
+            parent_indent = self._parent_task.indent if self._parent_task else ""
             new_task = Task(
                 title=result.title,
                 status=result.status,
                 time=time,
                 line_number=-1,
                 indent=parent_indent + get_indent_step(),
-                body=result.body,
-                children=result.subtasks,
-                parent=self._source_task,
             )
-            fix_parent_refs(new_task.children, new_task)
-            self._children.append(new_task)
+            new_block = task_to_block(new_task, result.body, result.subtasks)
+            self._children.append(new_block)
             flat = self._flat()
             self.cursor_idx = next(
-                (i for i, t in enumerate(flat) if t is new_task), len(flat) - 1
+                (i for i, b in enumerate(flat) if b is new_block), len(flat) - 1
             )
             self.refresh(layout=True)
 
@@ -125,24 +134,27 @@ class SubtaskList(Widget, can_focus=True):
         flat = self._flat()
         if not flat:
             return
-        selected = flat[self.cursor_idx]
+        selected_block = flat[self.cursor_idx]
 
         def on_result(result: TaskFormResult | None) -> None:
             if result is None:
                 return
-            selected.title = result.title
-            selected.status = result.status
-            selected.body = result.body
+            task = selected_block.task
+            task.title = result.title
+            task.status = result.status
             if result.time_start:
-                selected.time = TaskTime(
+                task.time = TaskTime(
                     start=result.time_start,
                     end=result.time_end if result.time_end else None,
                 )
             else:
-                selected.time = None
+                task.time = None
+            selected_block.refresh_header()
+            rebuilt = task_to_block(task, result.body, result.subtasks)
+            selected_block.nodes[:] = rebuilt.nodes
             self.refresh(layout=True)
 
-        self.app.push_screen(TaskFormScreen(selected), on_result)
+        self.app.push_screen(TaskFormScreen(selected_block), on_result)
 
     def action_delete_subtask(self) -> None:
         flat = self._flat()
@@ -153,7 +165,7 @@ class SubtaskList(Widget, can_focus=True):
         def on_confirm(confirmed: bool) -> None:
             if not confirmed:
                 return
-            self._remove_from_tree(target, self._children)
+            self._remove_block_from_tree(target, self._children)
             new_flat = self._flat()
             self.cursor_idx = min(self.cursor_idx, max(len(new_flat) - 1, 0))
             self.refresh(layout=True)
@@ -164,13 +176,14 @@ class SubtaskList(Widget, can_focus=True):
             on_confirm,
         )
 
-    def _remove_from_tree(self, target: Task, children: list[Task]) -> bool:
-        for i, child in enumerate(children):
-            if child is target:
-                children.pop(i)
-                return True
-            if self._remove_from_tree(target, child.children):
-                return True
+    def _remove_block_from_tree(self, target, container: list) -> bool:
+        for i, item in enumerate(container):
+            if isinstance(item, TaskBlock):
+                if item is target:
+                    container.pop(i)
+                    return True
+                if self._remove_block_from_tree(target, item.nodes):
+                    return True
         return False
 
 
@@ -221,12 +234,19 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
     }
     """
 
-    def __init__(self, task: Task | None = None):
+    def __init__(self, block: TaskBlock | None = None):
         super().__init__()
-        self._source_task = task
+        self._source_block = block
 
     def compose(self) -> ComposeResult:
-        task = self._source_task
+        block = self._source_block
+        task = block.task if block else None
+        body_str = ""
+        child_blocks: list = []
+        if block:
+            body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
+            body_str = textwrap.dedent('\n'.join(body_lines)).strip()
+            child_blocks = [n for n in block.nodes if isinstance(n, TaskBlock)]
         with VerticalGroup():
             yield Label("Title")
             yield Input(
@@ -254,13 +274,13 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
             )
             yield Label("Notes")
             yield TextArea(
-                text=textwrap.dedent(task.body) if task and task.body else "",
+                text=body_str,
                 id="body",
             )
             yield Label("Subtasks")
             yield SubtaskList(
-                task=task,
-                children=task.children if task else [],
+                parent_task=task,
+                children=child_blocks,
             )
             with HorizontalGroup(id="buttons"):
                 yield Button("Save", id="save", variant="primary")

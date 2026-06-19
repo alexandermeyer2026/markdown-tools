@@ -4,7 +4,7 @@ import shutil
 
 from models import Task
 from os_utils import FileFinder, resolve_date
-from parser.file_model import parse, populate_task_relations, all_tasks
+from parser.file_model import TaskBlock, parse
 from models import get_minutes
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,
@@ -44,8 +44,8 @@ class TimelineTool:
                 return
 
         nodes = parse(input_file)
-        populate_task_relations(nodes)
-        TimelineTool.render_timeline(all_tasks(nodes), date=date)
+        top_level_blocks = [n for n in nodes if isinstance(n, TaskBlock)]
+        TimelineTool.render_timeline(top_level_blocks, date=date)
 
     @staticmethod
     def render_scale(step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> None:
@@ -96,14 +96,14 @@ class TimelineTool:
         return (start_slot - first_task_slot) + bar_width + 1
 
     @staticmethod
-    def render_timeline_lines(tasks: list[Task], date: datetime.date, width: int) -> list[str]:
-        timed_tasks = [x for x in tasks if x.time and x.time.start and x.parent is None]
-        timed_tasks.sort(key=lambda x: get_minutes(x.time.start))
+    def render_timeline_lines(blocks: list, date: datetime.date, width: int) -> list[str]:
+        timed_blocks = [b for b in blocks if b.task.time and b.task.time.start]
+        timed_blocks.sort(key=lambda b: get_minutes(b.task.time.start))
 
-        if not timed_tasks:
+        if not timed_blocks:
             return ["No timed tasks found"]
 
-        first_task_minutes = get_minutes(timed_tasks[0].time.start)
+        first_task_minutes = get_minutes(timed_blocks[0].task.time.start)
         step = TimelineTool._step_size_for_width(first_task_minutes, width)
         first_task_slot = get_time_slot(first_task_minutes, step)
 
@@ -123,11 +123,12 @@ class TimelineTool:
                 scale_line = scale_line[:now_col] + WHITE + '▼' + RESET + scale_line[now_col + 1:]
 
         lines = [hours_line, scale_line]
-        for task in timed_tasks:
+        for block in timed_blocks:
+            task = block.task
             icon_col = TimelineTool._icon_col(task, step, first_task_slot)
             task_line = TimelineTool.render_task(task, step, first_task_slot, now_marker_slot)
-            task_body = body_rows(task, left_pad=icon_col)
-            task_subtasks = subtask_rows(task, left_pad=icon_col)
+            task_body = body_rows(block, left_pad=icon_col)
+            task_subtasks = subtask_rows(block, left_pad=icon_col)
             if now_col is not None:
                 task_line = insert_now_marker(task_line, now_col)
                 task_body = [insert_now_marker(l, now_col) for l in task_body]
@@ -139,10 +140,10 @@ class TimelineTool:
         return lines
 
     @staticmethod
-    def render_timeline(tasks: list[Task], date: datetime.date) -> None:
+    def render_timeline(blocks: list, date: datetime.date) -> None:
         try:
             width = shutil.get_terminal_size().columns
         except (OSError, AttributeError):
             width = 80
-        for line in TimelineTool.render_timeline_lines(tasks, date, width):
+        for line in TimelineTool.render_timeline_lines(blocks, date, width):
             print(line)

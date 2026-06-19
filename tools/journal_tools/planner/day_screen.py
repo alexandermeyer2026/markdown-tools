@@ -1,5 +1,6 @@
 import datetime
 import os
+import textwrap
 
 from rich.console import Group
 from rich.text import Text
@@ -10,13 +11,14 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime, get_minutes, minutes_to_time
+from parser.file_model import RawLine, TaskBlock
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_STYLES, get_time_slot, scale_lines,
 )
 from .daily import has_changes, save
 from .state import DayCache, PlannerState
-from .utils import flatten_tasks, fix_parent_refs
-from .weekly import append_block, remove_block, sort_timed_nodes, sync_body_to_block, task_to_block
+from .utils import flatten_tasks
+from .weekly import append_block, remove_block, sort_timed_nodes, task_to_block
 
 _STEP = 0.25          # hours per slot (15 min)
 _STEP_M = int(_STEP * 60)
@@ -78,15 +80,15 @@ class DayGrid(Widget, can_focus=True):
         return self._planner.days[self._day_key]
 
     @property
-    def _timed_tasks(self) -> list[Task]:
+    def _timed_tasks(self) -> list:
         return sorted(
-            [t for t in self._day().task_list if t.time],
-            key=lambda t: get_minutes(t.time.start),
+            [b for b in self._day().task_list if b.task.time],
+            key=lambda b: get_minutes(b.task.time.start),
         )
 
     @property
-    def _untimed_tasks(self) -> list[Task]:
-        return [t for t in self._day().task_list if not t.time]
+    def _untimed_tasks(self) -> list:
+        return [b for b in self._day().task_list if not b.task.time]
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -120,7 +122,8 @@ class DayGrid(Widget, can_focus=True):
             lines.append(hours_text)
             lines.append(scale_text)
 
-            for task in timed:
+            for block in timed:
+                task = block.task
                 start_slot = get_time_slot(get_minutes(task.time.start), _STEP)
                 end_slot = start_slot
                 if task.time.end:
@@ -128,8 +131,8 @@ class DayGrid(Widget, can_focus=True):
                 bar_width = max(end_slot - start_slot + 1, 1)
                 icon_col = start_slot + bar_width + len(task.time.to_str()) + 2
                 task_row = self._timed_task_row(task, selected)
-                task_body = self._body_rows(task, time_offset=icon_col)
-                task_subs = self._subtask_rows(task, selected, time_offset=icon_col)
+                task_body = self._body_rows(block, time_offset=icon_col)
+                task_subs = self._subtask_rows(block, selected, time_offset=icon_col)
                 if now_slot is not None:
                     task_row = self._insert_now_col(task_row, now_col)
                     task_body = [self._insert_now_col(l, now_col) for l in task_body]
@@ -145,10 +148,11 @@ class DayGrid(Widget, can_focus=True):
             lines.append(
                 Text.assemble(_MARGIN, ("── Unscheduled " + "─" * 50, "bright_black"))
             )
-            for task in untimed:
+            for block in untimed:
+                task = block.task
                 lines.append(self._untimed_task_row(task, selected))
-                lines.extend(self._body_rows(task))
-                lines.extend(self._subtask_rows(task, selected))
+                lines.extend(self._body_rows(block))
+                lines.extend(self._subtask_rows(block, selected))
 
         if not timed and not untimed:
             lines.append(Text(""))
@@ -204,12 +208,16 @@ class DayGrid(Widget, can_focus=True):
         t.append(task.title[:title_max], style="bold reverse" if is_sel else "bold")
         return t
 
-    def _body_rows(self, task: Task, depth: int = 0, time_offset: int = 0) -> list[Text]:
-        if not task.body:
+    def _body_rows(self, block: TaskBlock, depth: int = 0, time_offset: int = 0) -> list[Text]:
+        body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
+        if not body_lines:
+            return []
+        body_text = textwrap.dedent('\n'.join(body_lines)).strip()
+        if not body_text:
             return []
         rows = []
         prefix = " " * time_offset + "  " * (depth + 1)
-        for line in task.body.split('\n'):
+        for line in body_text.split('\n'):
             stripped = line.strip()
             if stripped:
                 t = Text(_MARGIN + prefix)
@@ -217,9 +225,10 @@ class DayGrid(Widget, can_focus=True):
                 rows.append(t)
         return rows
 
-    def _subtask_rows(self, task: Task, selected: Task | None, depth: int = 1, time_offset: int = 0) -> list[Text]:
+    def _subtask_rows(self, block: TaskBlock, selected: Task | None, depth: int = 1, time_offset: int = 0) -> list[Text]:
         rows: list[Text] = []
-        for child in task.children:
+        for child_block in [n for n in block.nodes if isinstance(n, TaskBlock)]:
+            child = child_block.task
             icon = STATUS_ICONS.get(child.status, "?")
             leading = " " * time_offset + "  " * depth
             title_max = max(self.size.width - len(leading) - 4, 0)
@@ -235,8 +244,8 @@ class DayGrid(Widget, can_focus=True):
                 t.append(icon, style="bright_black")
                 t.append(f" {child.title[:title_max]}", style="bright_black")
             rows.append(t)
-            rows.extend(self._body_rows(child, depth, time_offset))
-            rows.extend(self._subtask_rows(child, selected, depth + 1, time_offset))
+            rows.extend(self._body_rows(child_block, depth, time_offset))
+            rows.extend(self._subtask_rows(child_block, selected, depth + 1, time_offset))
         return rows
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -285,7 +294,7 @@ class DayGrid(Widget, can_focus=True):
 
     def _shift_selected(self, direction: int) -> None:
         task = self._selected()
-        if task is None or task.parent is not None:
+        if task is None or task.indent:
             return
         day = self._day()
         if task.time is None:
@@ -318,7 +327,7 @@ class DayGrid(Widget, can_focus=True):
 
     def action_shrink_end(self) -> None:
         task = self._selected()
-        if task is None or task.parent is not None or task.time is None:
+        if task is None or task.indent or task.time is None:
             return
         if task.time.end:
             start_m = get_minutes(task.time.start)
@@ -334,7 +343,7 @@ class DayGrid(Widget, can_focus=True):
 
     def action_extend_end(self) -> None:
         task = self._selected()
-        if task is None or task.parent is not None or task.time is None:
+        if task is None or task.indent or task.time is None:
             return
         if task.time.end:
             new_end = min(get_minutes(task.time.end) + _STEP_M, 24 * 60)
@@ -348,7 +357,7 @@ class DayGrid(Widget, can_focus=True):
 
     def action_remove_time(self) -> None:
         task = self._selected()
-        if task is None or task.parent is not None:
+        if task is None or task.indent:
             return
         if task.time:
             task.time = None
@@ -383,13 +392,16 @@ class DayGrid(Widget, can_focus=True):
         if task is None:
             return
         from .task_form_screen import TaskFormScreen, TaskFormResult
+        day = self._day()
+        block = day.find_block(task)
+        if block is None:
+            return
 
         def on_result(result: TaskFormResult | None) -> None:
             if result is None:
                 return
             task.title = result.title
             task.status = result.status
-            task.body = result.body
             if result.time_start:
                 task.time = TaskTime(
                     start=result.time_start,
@@ -397,11 +409,9 @@ class DayGrid(Widget, can_focus=True):
                 )
             else:
                 task.time = None
-            fix_parent_refs(task.children, task)
-            block = self._day().find_block(task)
-            if block:
-                block.refresh_header()
-                sync_body_to_block(block, task)
+            block.refresh_header()
+            rebuilt = task_to_block(task, result.body, result.subtasks)
+            block.nodes[:] = rebuilt.nodes
             nav = self._navigable()
             self.cursor_idx = next(
                 (i for i, t in enumerate(nav) if t is task),
@@ -409,7 +419,7 @@ class DayGrid(Widget, can_focus=True):
             )
             self.refresh()
 
-        self.app.push_screen(TaskFormScreen(task), on_result)
+        self.app.push_screen(TaskFormScreen(block), on_result)
 
     def action_new_task(self) -> None:
         from .task_form_screen import TaskFormScreen, TaskFormResult
@@ -429,14 +439,10 @@ class DayGrid(Widget, can_focus=True):
                 time=time,
                 line_number=-1,
                 indent="",
-                body=result.body,
-                children=result.subtasks,
             )
-            fix_parent_refs(new_task.children, new_task)
+            block = task_to_block(new_task, result.body, result.subtasks)
             day = self._day()
-            block = task_to_block(new_task)
             append_block(day.nodes, block)
-            day.task_list.append(new_task)
             nav = self._navigable()
             self.cursor_idx = next(
                 (i for i, t in enumerate(nav) if t is new_task), len(nav) - 1
@@ -450,10 +456,6 @@ class DayGrid(Widget, can_focus=True):
         if task is None:
             return
         day = self._day()
-        if task.parent is None:
-            day.task_list.remove(task)
-        else:
-            task.parent.children.remove(task)
         block = day.find_block(task)
         if block:
             remove_block(day.nodes, block)

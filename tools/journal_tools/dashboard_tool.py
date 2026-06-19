@@ -4,7 +4,7 @@ import os
 import shutil
 
 from os_utils import FileFinder
-from parser.file_model import parse, populate_task_relations, all_tasks
+from parser.file_model import TaskBlock, parse
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
     ansi_truncate_pad, body_rows, subtask_rows, get_minutes,
@@ -45,15 +45,15 @@ class DashboardTool:
                                today + datetime.timedelta(days=DashboardTool.UPCOMING_DAYS))
 
         overdue = []
-        for d, tasks in sorted(overdue_by_date.items()):
-            day = [t for t in tasks if t.status in ('todo', 'in progress', 'started') and t.parent is None]
-            timed   = sorted([t for t in day if t.time], key=lambda t: get_minutes(t.time.start))
-            untimed = [t for t in day if not t.time]
-            overdue.extend((d, t) for t in timed + untimed)
+        for d, blocks in sorted(overdue_by_date.items()):
+            day = [b for b in blocks if b.task.status in ('todo', 'in progress', 'started')]
+            timed   = sorted([b for b in day if b.task.time], key=lambda b: get_minutes(b.task.time.start))
+            untimed = [b for b in day if not b.task.time]
+            overdue.extend((d, b) for b in timed + untimed)
         upcoming = {
-            d: [t for t in tasks if t.parent is None]
-            for d, tasks in sorted(upcoming_by_date.items())
-            if any(t.parent is None for t in tasks)
+            d: blocks
+            for d, blocks in sorted(upcoming_by_date.items())
+            if blocks
         }
 
         blocks = []
@@ -71,8 +71,7 @@ class DashboardTool:
         for f in files:
             date = FileFinder.get_journal_file_date(f)
             nodes = parse(f)
-            populate_task_relations(nodes)
-            result[date] = all_tasks(nodes)
+            result[date] = [n for n in nodes if isinstance(n, TaskBlock)]
         return result
 
     @staticmethod
@@ -81,8 +80,7 @@ class DashboardTool:
         if not files:
             return []
         nodes = parse(files[0])
-        populate_task_relations(nodes)
-        return all_tasks(nodes)
+        return [n for n in nodes if isinstance(n, TaskBlock)]
 
     # ── Rendering helpers ─────────────────────────────────────────────────────
 
@@ -176,31 +174,32 @@ class DashboardTool:
         if not overdue:
             lines.append(pad(f"  {GRAY}–{RESET}"))
         else:
-            for date, task in overdue:
+            for date, block in overdue:
+                task = block.task
                 icon = STATUS_ICONS.get(task.status, '○')
                 lines.append(pad(
                     f"  {RED}{icon}{RESET}  {GRAY}{date.strftime('%a %-d %b')}{RESET}  {task.title}"
                 ))
-                for bline in body_rows(task, left_pad=2):
+                for bline in body_rows(block, left_pad=2):
                     lines.append(pad(bline))
-                lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
+                lines.extend(pad(line) for line in subtask_rows(block, left_pad=4))
         return lines
 
     @staticmethod
-    def _col_today(today, now, all_tasks, col_w):
-        timed   = sorted([t for t in all_tasks if t.time and t.parent is None],
-                         key=lambda t: get_minutes(t.time.start))
-        untimed = [t for t in all_tasks if not t.time and t.parent is None]
+    def _col_today(today, now, today_blocks, col_w):
+        timed   = sorted([b for b in today_blocks if b.task.time],
+                         key=lambda b: get_minutes(b.task.time.start))
+        untimed = [b for b in today_blocks if not b.task.time]
         total   = len(timed) + len(untimed)
-        done    = sum(1 for t in timed + untimed if t.status == 'done')
+        done    = sum(1 for b in timed + untimed if b.task.status == 'done')
 
-        now_m     = now.hour * 60 + now.minute
-        next_task = next(
-            (t for t in timed if get_minutes(t.time.start) > now_m and t.status != 'done'), None
+        now_m      = now.hour * 60 + now.minute
+        next_block = next(
+            (b for b in timed if get_minutes(b.task.time.start) > now_m and b.task.status != 'done'), None
         )
         summary = [f"{total} task{'s' if total != 1 else ''}", f"{done} ✓"]
-        if next_task:
-            delta = get_minutes(next_task.time.start) - now_m
+        if next_block:
+            delta = get_minutes(next_block.task.time.start) - now_m
             h, m  = divmod(delta, 60)
             summary.append(f"next in {f'{h}h {m}m' if h else f'{m}m'}")
 
@@ -217,13 +216,14 @@ class DashboardTool:
 
         if timed and untimed:
             lines.append(' ' * col_w)
-        for task in untimed:
+        for block in untimed:
+            task  = block.task
             icon  = STATUS_ICONS.get(task.status, '○')
             color = STATUS_COLORS.get(task.status, GRAY)
             lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
-            for bline in body_rows(task, left_pad=2):
+            for bline in body_rows(block, left_pad=2):
                 lines.append(pad(bline))
-            lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
+            lines.extend(pad(line) for line in subtask_rows(block, left_pad=4))
 
         return lines
 
@@ -236,9 +236,9 @@ class DashboardTool:
             return lines
         tomorrow = today + datetime.timedelta(days=1)
         for i, date in enumerate(sorted(upcoming_by_date)):
-            tasks = upcoming_by_date[date]
-            timed   = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
-            untimed = [t for t in tasks if not t.time]
+            blocks  = upcoming_by_date[date]
+            timed   = sorted([b for b in blocks if b.task.time], key=lambda b: get_minutes(b.task.time.start))
+            untimed = [b for b in blocks if not b.task.time]
             delta = (date - today).days
             label = f"Tomorrow, {date.strftime('%-d %b')}" if delta == 1 else date.strftime('%A, %-d %b')
             if i > 0:
@@ -248,21 +248,23 @@ class DashboardTool:
                 for line in TimelineTool.render_timeline_lines(timed, date, col_w - 2):
                     lines.append(pad('  ' + line))
             else:
-                for task in timed:
+                for block in timed:
+                    task        = block.task
                     icon        = STATUS_ICONS.get(task.status, '○')
                     color       = STATUS_COLORS.get(task.status, GRAY)
                     time_prefix = f"{GRAY}{task.time.to_str()}  {RESET}"
                     lines.append(pad(f"  {color}{icon}{RESET}  {time_prefix}{task.title}"))
-                    for bline in body_rows(task, left_pad=2):
+                    for bline in body_rows(block, left_pad=2):
                         lines.append(pad(bline))
-                    lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
-            for task in untimed:
+                    lines.extend(pad(line) for line in subtask_rows(block, left_pad=4))
+            for block in untimed:
+                task  = block.task
                 icon  = STATUS_ICONS.get(task.status, '○')
                 color = STATUS_COLORS.get(task.status, GRAY)
                 lines.append(pad(f"  {color}{icon}{RESET}  {task.title}"))
-                for bline in body_rows(task, left_pad=2):
+                for bline in body_rows(block, left_pad=2):
                     lines.append(pad(bline))
-                lines.extend(pad(line) for line in subtask_rows(task, left_pad=4))
+                lines.extend(pad(line) for line in subtask_rows(block, left_pad=4))
         return lines
 
     @staticmethod

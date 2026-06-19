@@ -1,37 +1,29 @@
-from config import get_indent_step
 from models import Task, get_minutes
+from parser.file_model import TaskBlock
 
 
-def fix_parent_refs(tasks: list[Task], parent: Task | None) -> None:
-    """Set parent refs and (for new tasks) correct indentation throughout a subtree."""
-    parent_indent = parent.indent if parent else ""
-    for task in tasks:
-        task.parent = parent
-        if task.line_number == -1:
-            task.indent = parent_indent + get_indent_step()
-        fix_parent_refs(task.children, task)
-
-
-def flatten_tasks(tasks: list) -> list:
+def flatten_tasks(blocks: list) -> list[Task]:
+    """Return all Tasks in document order (DFS) from a list of TaskBlocks."""
     result = []
-    for task in tasks:
-        result.append(task)
-        result.extend(flatten_tasks(task.children))
+    for block in blocks:
+        if isinstance(block, TaskBlock):
+            result.append(block.task)
+            result.extend(flatten_tasks([n for n in block.nodes if isinstance(n, TaskBlock)]))
     return result
 
 
-def root_task(task: Task) -> Task:
-    while task.parent is not None:
-        task = task.parent
-    return task
+def _block_with_depth(block: TaskBlock, depth: int) -> list[tuple]:
+    result = [(block.task, depth)]
+    for child_block in [n for n in block.nodes if isinstance(n, TaskBlock)]:
+        result.extend(_block_with_depth(child_block, depth + 1))
+    return result
 
 
-def week_expanded(tasks: list) -> list[Task]:
-    """Flatten top-level tasks and all their descendants for week display, timed first."""
-    timed = sorted([t for t in tasks if t.time], key=lambda t: get_minutes(t.time.start))
-    untimed = [t for t in tasks if not t.time]
+def week_expanded(blocks: list) -> list[tuple]:
+    """Flatten top-level blocks for week display, timed first. Returns (task, depth) pairs."""
+    timed = sorted([b for b in blocks if b.task.time], key=lambda b: get_minutes(b.task.time.start))
+    untimed = [b for b in blocks if not b.task.time]
     result = []
-    for task in timed + untimed:
-        result.append(task)
-        result.extend(flatten_tasks(task.children))
+    for block in timed + untimed:
+        result.extend(_block_with_depth(block, 0))
     return result

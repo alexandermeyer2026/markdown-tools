@@ -1,7 +1,9 @@
 import math
 import re
+import textwrap
 
 from models import Task, get_minutes, minutes_to_time
+from parser.file_model import RawLine, TaskBlock
 
 STATUS_ICONS: dict[str, str] = {
     'todo':        '○',
@@ -102,29 +104,34 @@ def insert_now_marker(line: str, col: int) -> str:
     return ''.join(out)
 
 
-def body_rows(task: Task, left_pad: int = 0, depth: int = 0) -> list[str]:
-    if not task.body:
+def body_rows(block: TaskBlock, left_pad: int = 0, depth: int = 0) -> list[str]:
+    body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
+    if not body_lines:
+        return []
+    body_text = textwrap.dedent('\n'.join(body_lines)).strip()
+    if not body_text:
         return []
     prefix = ' ' * left_pad + '  ' * (depth + 1)
     rows = []
-    for line in task.body.split('\n'):
+    for line in body_text.split('\n'):
         stripped = line.strip()
         if stripped:
             rows.append(f"{prefix}{GRAY}{ITALIC}{stripped}{RESET}")
     return rows
 
 
-def subtask_rows(task: Task, left_pad: int = 0, depth: int = 1, selected_task=None) -> list[str]:
+def subtask_rows(block: TaskBlock, left_pad: int = 0, depth: int = 1, selected_task=None) -> list[str]:
     rows = []
-    for child in task.children:
+    for child_block in [n for n in block.nodes if isinstance(n, TaskBlock)]:
+        child = child_block.task
         indent = ' ' * left_pad + '  ' * depth
         icon = STATUS_ICONS.get(child.status, '?')
         if child is selected_task:
             rows.append(f"{indent[:-2]}\x1b[7m> {icon} {child.title}{RESET}")
         else:
             rows.append(f"{indent}{GRAY}{icon} {child.title}{RESET}")
-        rows.extend(body_rows(child, left_pad, depth))
-        rows.extend(subtask_rows(child, left_pad, depth + 1, selected_task))
+        rows.extend(body_rows(child_block, left_pad, depth))
+        rows.extend(subtask_rows(child_block, left_pad, depth + 1, selected_task))
     return rows
 
 

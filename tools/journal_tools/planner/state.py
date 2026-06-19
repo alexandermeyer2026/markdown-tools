@@ -1,9 +1,8 @@
 import datetime
 import os
-from dataclasses import dataclass
 
 from os_utils import FileFinder
-from parser.file_model import TaskBlock, parse, populate_task_relations, serialize
+from parser.file_model import TaskBlock, parse, serialize
 
 
 def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
@@ -17,12 +16,15 @@ def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
     return None
 
 
-@dataclass
 class DayCache:
-    file_path: str | None
-    nodes: list           # list[Node] — top-level node list (mutable)
-    original_content: str # serialized file content at load time
-    task_list: list       # [block.task for top-level TaskBlocks] — mutable by screens
+    def __init__(self, file_path, nodes, original_content):
+        self.file_path = file_path
+        self.nodes = nodes
+        self.original_content = original_content
+
+    @property
+    def task_list(self) -> list:
+        return [n for n in self.nodes if isinstance(n, TaskBlock)]
 
     def find_block(self, task) -> 'TaskBlock | None':
         return _find_block_in(self.nodes, task)
@@ -73,12 +75,10 @@ class PlannerState:
         else:
             nodes = []
             original_content = ''
-        populate_task_relations(nodes)
         self._days[key] = DayCache(
             file_path=file_path,
             nodes=nodes,
             original_content=original_content,
-            task_list=[n.task for n in nodes if isinstance(n, TaskBlock)],
         )
 
 

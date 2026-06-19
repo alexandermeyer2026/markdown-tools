@@ -47,9 +47,6 @@ class Task:
     time: Optional[TaskTime]
     line_number: int
     indent: str = ''
-    body: Optional[str] = None
-    parent: Optional[Task] = field(default=None, compare=False, repr=False)
-    children: list[Task] = field(default_factory=list, compare=False, repr=False)
 
     def to_line(self) -> str:
         status_char = status_char_map().get(self.status, '?')
