@@ -5,7 +5,7 @@ import unittest
 import pytest
 
 from models.task import Task, TaskTime
-from parser.task_parser import TaskParser
+from parser.file_model import parse, populate_task_relations, TaskBlock
 
 
 def write_temp(content: str) -> str:
@@ -15,13 +15,28 @@ def write_temp(content: str) -> str:
     return f.name
 
 
+def _flat_tasks(nodes) -> list[Task]:
+    result = []
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            result.append(node.task)
+            result.extend(_flat_tasks(node.nodes))
+    return result
+
+
+def _parse_file(content: str) -> list[Task]:
+    path = write_temp(content)
+    try:
+        nodes = parse(path)
+        populate_task_relations(nodes)
+        return _flat_tasks(nodes)
+    finally:
+        os.unlink(path)
+
+
 class TestStatus(unittest.TestCase):
     def _parse(self, line: str) -> Task:
-        path = write_temp(line + '\n')
-        try:
-            tasks = TaskParser.parse_file(path)
-        finally:
-            os.unlink(path)
+        tasks = _parse_file(line + '\n')
         self.assertEqual(len(tasks), 1)
         return tasks[0]
 
@@ -44,22 +59,13 @@ class TestStatus(unittest.TestCase):
         self.assertEqual(self._parse('- [~] Task').status, 'started')
 
     def test_non_task_line_skipped(self):
-        path = write_temp('Just a regular line\n')
-        try:
-            tasks = TaskParser.parse_file(path)
-        finally:
-            os.unlink(path)
+        tasks = _parse_file('Just a regular line\n')
         self.assertEqual(tasks, [])
 
 
 class TestFields(unittest.TestCase):
     def _parse_first(self, content: str) -> Task:
-        path = write_temp(content)
-        try:
-            tasks = TaskParser.parse_file(path)
-        finally:
-            os.unlink(path)
-        return tasks[0]
+        return _parse_file(content)[0]
 
     def test_title_extracted(self):
         task = self._parse_first('- [ ] Buy milk\n')
@@ -118,11 +124,7 @@ class TestFields(unittest.TestCase):
 
     def test_multiple_tasks(self):
         content = '- [ ] First\n- [x] Second\n- […] Third\n'
-        path = write_temp(content)
-        try:
-            tasks = TaskParser.parse_file(path)
-        finally:
-            os.unlink(path)
+        tasks = _parse_file(content)
         self.assertEqual(len(tasks), 3)
         self.assertEqual(tasks[0].title, 'First')
         self.assertEqual(tasks[1].status, 'done')
@@ -139,46 +141,38 @@ class TestFields(unittest.TestCase):
         self.assertEqual(task.title, 'Meeting')
 
 
-def _parse_block(content: str) -> list[Task]:
-    path = write_temp(content)
-    try:
-        return TaskParser.parse_file(path)
-    finally:
-        os.unlink(path)
-
-
 @pytest.mark.integration
 class TestTaskBody(unittest.TestCase):
     def test_single_body_line(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Task\n'
             '  Some note\n'
         )
-        self.assertEqual(tasks[0].body, '  Some note')
+        self.assertEqual(tasks[0].body, 'Some note')
 
     def test_multiline_body(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Task\n'
             '  First note\n'
             '  Second note\n'
         )
-        self.assertEqual(tasks[0].body, '  First note\n  Second note')
+        self.assertEqual(tasks[0].body, 'First note\nSecond note')
 
     def test_no_body_when_no_indented_lines(self):
-        tasks = _parse_block('- [ ] Task\n')
+        tasks = _parse_file('- [ ] Task\n')
         self.assertIsNone(tasks[0].body)
 
     def test_body_does_not_bleed_into_next_sibling(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] First\n'
             '  Body of first\n'
             '- [ ] Second\n'
         )
-        self.assertEqual(tasks[0].body, '  Body of first')
+        self.assertEqual(tasks[0].body, 'Body of first')
         self.assertIsNone(tasks[1].body)
 
     def test_non_indented_line_is_not_body(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Task\n'
             'Not indented\n'
         )
@@ -188,15 +182,15 @@ class TestTaskBody(unittest.TestCase):
 @pytest.mark.integration
 class TestSubtaskRelationships(unittest.TestCase):
     def test_top_level_task_has_no_parent(self):
-        tasks = _parse_block('- [ ] Top level\n')
+        tasks = _parse_file('- [ ] Top level\n')
         self.assertIsNone(tasks[0].parent)
 
     def test_top_level_task_has_empty_children(self):
-        tasks = _parse_block('- [ ] Top level\n')
+        tasks = _parse_file('- [ ] Top level\n')
         self.assertEqual(tasks[0].children, [])
 
     def test_subtask_parent_set(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  - [ ] Child\n'
         )
@@ -204,7 +198,7 @@ class TestSubtaskRelationships(unittest.TestCase):
         self.assertIs(child.parent, parent)
 
     def test_subtask_appears_in_parent_children(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  - [ ] Child\n'
         )
@@ -212,7 +206,7 @@ class TestSubtaskRelationships(unittest.TestCase):
         self.assertIn(child, parent.children)
 
     def test_sibling_subtasks_share_parent(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  - [ ] Child 1\n'
             '  - [ ] Child 2\n'
@@ -223,7 +217,7 @@ class TestSubtaskRelationships(unittest.TestCase):
         self.assertEqual(parent.children, [child1, child2])
 
     def test_recursive_nesting(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Top\n'
             '  - [ ] Mid\n'
             '    - [ ] Leaf\n'
@@ -234,7 +228,7 @@ class TestSubtaskRelationships(unittest.TestCase):
         self.assertIs(leaf.parent, mid)
 
     def test_grandchild_accessible_via_children(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Top\n'
             '  - [ ] Mid\n'
             '    - [ ] Leaf\n'
@@ -246,26 +240,26 @@ class TestSubtaskRelationships(unittest.TestCase):
 @pytest.mark.integration
 class TestInterleavedBodyAndSubtasks(unittest.TestCase):
     def test_body_before_subtask(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  A note\n'
             '  - [ ] Child\n'
         )
         parent, child = tasks
-        self.assertEqual(parent.body, '  A note')
+        self.assertEqual(parent.body, 'A note')
         self.assertIs(child.parent, parent)
 
     def test_body_after_subtask(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  - [ ] Child\n'
             '  A trailing note\n'
         )
         parent, child = tasks
-        self.assertEqual(parent.body, '  A trailing note')
+        self.assertEqual(parent.body, 'A trailing note')
 
     def test_body_interleaved_between_subtasks(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  First note\n'
             '  - [ ] Child 1\n'
@@ -274,32 +268,32 @@ class TestInterleavedBodyAndSubtasks(unittest.TestCase):
             '  Last note\n'
         )
         parent, child1, child2 = tasks
-        self.assertEqual(parent.body, '  First note\n  Middle note\n  Last note')
+        self.assertEqual(parent.body, 'First note\nMiddle note\nLast note')
         self.assertEqual(parent.children, [child1, child2])
 
     def test_subtask_with_own_body(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  - [ ] Child\n'
             '    Child note\n'
         )
         parent, child = tasks
         self.assertIsNone(parent.body)
-        self.assertEqual(child.body, '    Child note')
+        self.assertEqual(child.body, 'Child note')
 
     def test_subtask_with_body_and_grandchild(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '  - [ ] Child\n'
             '    Child note\n'
             '    - [ ] Grandchild\n'
         )
         parent, child, grandchild = tasks
-        self.assertEqual(child.body, '    Child note')
+        self.assertEqual(child.body, 'Child note')
         self.assertIs(grandchild.parent, child)
 
     def test_complex_nested_block(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Top\n'
             '  Top note\n'
             '  - [ ] Mid\n'
@@ -308,14 +302,14 @@ class TestInterleavedBodyAndSubtasks(unittest.TestCase):
             '  Another top note\n'
         )
         top, mid, leaf = tasks
-        self.assertEqual(top.body, '  Top note\n  Another top note')
-        self.assertEqual(mid.body, '    Mid note')
+        self.assertEqual(top.body, 'Top note\nAnother top note')
+        self.assertEqual(mid.body, 'Mid note')
         self.assertIsNone(leaf.body)
         self.assertIs(mid.parent, top)
         self.assertIs(leaf.parent, mid)
 
     def test_poorly_formatted_block(self):
-        tasks = _parse_block(
+        tasks = _parse_file(
             '- [ ] Parent\n'
             '    Parent note\n'
             '  - [ ] Child 1\n'
@@ -325,9 +319,9 @@ class TestInterleavedBodyAndSubtasks(unittest.TestCase):
             '  - [ ] Grandchild\n'
         )
         parent, child1, child2, grandchild = tasks
-        self.assertEqual(parent.body, '    Parent note')
+        self.assertEqual(parent.body, 'Parent note')
         self.assertEqual(parent.children, [child1, child2])
-        self.assertEqual(child1.body, '    Child 1 note\n      Child 1 note')
+        self.assertEqual(child1.body, 'Child 1 note\n  Child 1 note')
         self.assertEqual(child2.children, [grandchild])
         self.assertIs(grandchild.parent, child2)
 

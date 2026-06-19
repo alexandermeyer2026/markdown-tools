@@ -1,10 +1,9 @@
 import datetime
 import os
-import textwrap
 from dataclasses import dataclass
 
 from os_utils import FileFinder
-from parser.file_model import RawLine, TaskBlock, parse, serialize
+from parser.file_model import TaskBlock, parse, populate_task_relations, serialize
 
 
 def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
@@ -16,20 +15,6 @@ def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
             if result is not None:
                 return result
     return None
-
-
-def _populate_task_relations(nodes: list, parent_task=None) -> None:
-    """Walk the node tree, setting task.parent, task.children, and task.body."""
-    for node in nodes:
-        if isinstance(node, TaskBlock):
-            node.task.parent = parent_task
-            node.task.children = [n.task for n in node.nodes if isinstance(n, TaskBlock)]
-            # Collect raw body lines (non-task nodes), then fully dedent so that
-            # task.body matches what TaskFormScreen shows after textwrap.dedent().
-            body_lines = [n.raw.rstrip('\n') for n in node.nodes if isinstance(n, RawLine)]
-            body_text = textwrap.dedent('\n'.join(body_lines)).strip()
-            node.task.body = body_text if body_text else None
-            _populate_task_relations(node.nodes, node.task)
 
 
 @dataclass
@@ -88,7 +73,7 @@ class PlannerState:
         else:
             nodes = []
             original_content = ''
-        _populate_task_relations(nodes)
+        populate_task_relations(nodes)
         self._days[key] = DayCache(
             file_path=file_path,
             nodes=nodes,

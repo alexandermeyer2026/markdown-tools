@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from parser.task_parser import TaskParser
+from parser.file_model import parse, populate_task_relations, all_tasks
 from tools.journal_tools.catch_up_tool import CatchUpTool
 
 
@@ -30,8 +30,9 @@ class TestIntegration(unittest.TestCase):
         os.unlink(self.path)
 
     def _open_tasks(self):
-        tasks = TaskParser.parse_file(self.path)
-        return [t for t in tasks if t.status in ('todo', 'in progress')]
+        nodes = parse(self.path)
+        populate_task_relations(nodes)
+        return [t for t in all_tasks(nodes) if t.status in ('todo', 'in progress')]
 
     def _read(self):
         with open(self.path, encoding='utf-8') as f:

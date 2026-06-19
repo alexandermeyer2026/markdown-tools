@@ -5,7 +5,8 @@ from config import get_indent_step
 from models import Task, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter
 from parser.file_model import RawLine, TaskBlock, parse, serialize
-from .state import DayCache, WeekState, _populate_task_relations
+from parser.file_model import populate_task_relations
+from .state import DayCache, WeekState
 from .utils import root_task, week_expanded
 
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -19,7 +20,7 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
             nodes = parse(files[0])
             with open(files[0], 'r', encoding='utf-8') as f:
                 original_content = f.read()
-            _populate_task_relations(nodes)
+            populate_task_relations(nodes)
             cache[key] = DayCache(
                 file_path=files[0],
                 nodes=nodes,

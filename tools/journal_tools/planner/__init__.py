@@ -2,7 +2,6 @@ import datetime
 import os
 
 from os_utils import FileFinder, resolve_date
-from parser import TaskParser
 
 from .app import PlannerApp
 from .state import DayCache, WeekState

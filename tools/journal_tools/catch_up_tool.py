@@ -4,7 +4,7 @@ from difflib import unified_diff
 
 from models import Task
 from os_utils import BackupManager, FileFinder, FileWriter
-from parser import TaskParser
+from parser.file_model import parse, populate_task_relations, all_tasks
 from tools.journal_tools.rendering import BOLD, GRAY, GREEN, RED, RESET
 
 
@@ -22,7 +22,9 @@ class CatchUpTool:
             return
 
         for file_path in journal_files:
-            tasks = TaskParser.parse_file(file_path)
+            nodes = parse(file_path)
+            populate_task_relations(nodes)
+            tasks = all_tasks(nodes)
             open_tasks = [
                 task for task in tasks
                 if task.status in ['todo', 'in progress']

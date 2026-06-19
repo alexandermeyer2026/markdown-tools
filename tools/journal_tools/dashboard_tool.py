@@ -4,7 +4,7 @@ import os
 import shutil
 
 from os_utils import FileFinder
-from parser import TaskParser
+from parser.file_model import parse, populate_task_relations, all_tasks
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
     ansi_truncate_pad, body_rows, subtask_rows, get_minutes,
@@ -70,13 +70,19 @@ class DashboardTool:
         result = {}
         for f in files:
             date = FileFinder.get_journal_file_date(f)
-            result[date] = TaskParser.parse_file(f)
+            nodes = parse(f)
+            populate_task_relations(nodes)
+            result[date] = all_tasks(nodes)
         return result
 
     @staticmethod
     def _tasks_for_date(directory, date):
         files = FileFinder.find_journal_files(directory, date_from=date, date_to=date)
-        return TaskParser.parse_file(files[0]) if files else []
+        if not files:
+            return []
+        nodes = parse(files[0])
+        populate_task_relations(nodes)
+        return all_tasks(nodes)
 
     # ── Rendering helpers ─────────────────────────────────────────────────────
 

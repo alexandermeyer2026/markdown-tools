@@ -4,7 +4,7 @@ import shutil
 
 from models import Task
 from os_utils import FileFinder, resolve_date
-from parser import TaskParser
+from parser.file_model import parse, populate_task_relations, all_tasks
 from models import get_minutes
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,
@@ -43,8 +43,9 @@ class TimelineTool:
                 print(f"File {input_file} does not exist")
                 return
 
-        tasks = TaskParser.parse_file(input_file)
-        TimelineTool.render_timeline(tasks, date=date)
+        nodes = parse(input_file)
+        populate_task_relations(nodes)
+        TimelineTool.render_timeline(all_tasks(nodes), date=date)
 
     @staticmethod
     def render_scale(step_size_hours: float, first_task_slot: int, now_marker_slot: int) -> None:

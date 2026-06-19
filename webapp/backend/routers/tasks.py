@@ -6,7 +6,7 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from parser.task_parser import TaskParser
+from parser.file_model import parse, populate_task_relations, TaskBlock, all_tasks
 from models.task import Task, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter
@@ -41,10 +41,11 @@ class UpdateTaskRequest(BaseModel):
 def get_tasks(date: str, _user=Depends(get_current_user)):
     path = resolve_journal_file(date)
     try:
-        all_tasks = TaskParser.parse_file(str(path))
+        nodes = parse(str(path))
+        populate_task_relations(nodes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse file: {e}")
-    top_level = [t for t in all_tasks if t.parent is None]
+    top_level = [n.task for n in nodes if isinstance(n, TaskBlock)]
     return {"date": date, "tasks": [_task_to_dict(t) for t in top_level]}
 
 
@@ -93,8 +94,9 @@ def update_task_status(
         )
 
     path = resolve_journal_file(date)
-    all_tasks = TaskParser.parse_file(str(path))
-    task = next((t for t in all_tasks if t.line_number == line_number), None)
+    nodes = parse(str(path))
+    populate_task_relations(nodes)
+    task = next((t for t in all_tasks(nodes) if t.line_number == line_number), None)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found at that line")
 

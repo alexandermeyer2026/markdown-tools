@@ -1,4 +1,3 @@
-from .task_parser import TaskParser
-from .file_model import RawLine, TaskBlock, parse, serialize
+from .file_model import RawLine, TaskBlock, parse, serialize, populate_task_relations, all_tasks
 
-__all__ = ['TaskParser', 'RawLine', 'TaskBlock', 'parse', 'serialize']
+__all__ = ['RawLine', 'TaskBlock', 'parse', 'serialize', 'populate_task_relations', 'all_tasks']

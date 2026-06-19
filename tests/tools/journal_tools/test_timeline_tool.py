@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from parser.task_parser import TaskParser
+from parser.file_model import parse, populate_task_relations, all_tasks
 from tools.journal_tools.rendering import get_time_slot
 from tools.journal_tools.timeline_tool import TimelineTool
 
@@ -99,7 +99,7 @@ class TestIntegration(unittest.TestCase):
     )
 
     def setUp(self):
-        tasks = TaskParser.parse_file(FIXTURE)
+        nodes = parse(FIXTURE); populate_task_relations(nodes); tasks = all_tasks(nodes)
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 80})()):
             with redirect_stdout(buf):
@@ -131,7 +131,7 @@ class TestIntegrationHalfHourStep(unittest.TestCase):
     )
 
     def setUp(self):
-        tasks = TaskParser.parse_file(FIXTURE)
+        nodes = parse(FIXTURE); populate_task_relations(nodes); tasks = all_tasks(nodes)
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 50})()):
             with redirect_stdout(buf):
@@ -157,7 +157,7 @@ class TestIntegrationHourStep(unittest.TestCase):
     )
 
     def setUp(self):
-        tasks = TaskParser.parse_file(FIXTURE)
+        nodes = parse(FIXTURE); populate_task_relations(nodes); tasks = all_tasks(nodes)
         buf = io.StringIO()
         with patch('shutil.get_terminal_size', return_value=type('T', (), {'columns': 20})()):
             with redirect_stdout(buf):

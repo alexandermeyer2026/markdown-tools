@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import textwrap
 from dataclasses import dataclass, field
 from typing import Union
 
@@ -37,7 +38,29 @@ def serialize(nodes: list[Node]) -> str:
     return ''.join(parts)
 
 
-def _parse_task_from_line(line: str) -> Task | None:
+def populate_task_relations(nodes: list, parent_task=None) -> None:
+    """Walk the node tree, setting task.parent, task.children, and task.body."""
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            node.task.parent = parent_task
+            node.task.children = [n.task for n in node.nodes if isinstance(n, TaskBlock)]
+            body_lines = [n.raw.rstrip('\n') for n in node.nodes if isinstance(n, RawLine)]
+            body_text = textwrap.dedent('\n'.join(body_lines)).strip()
+            node.task.body = body_text if body_text else None
+            populate_task_relations(node.nodes, node.task)
+
+
+def all_tasks(nodes: list) -> list[Task]:
+    """Return all Task objects in document order (depth-first)."""
+    result = []
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            result.append(node.task)
+            result.extend(all_tasks(node.nodes))
+    return result
+
+
+def _parse_task_from_line(line: str, line_number: int = -1) -> Task | None:
     config = get_task_config()
     match = re.search(config['checkbox_pattern'], line)
     if not match:
@@ -63,7 +86,7 @@ def _parse_task_from_line(line: str) -> Task | None:
         )
 
     title = re.sub(config['time_pattern'], '', task_head).strip()
-    return Task(title=title, status=status, time=task_time, line_number=-1, indent=indent)
+    return Task(title=title, status=status, time=task_time, line_number=line_number, indent=indent)
 
 
 def parse(file_path: str) -> list[Node]:
@@ -79,7 +102,7 @@ def parse(file_path: str) -> list[Node]:
 
     n_lines = len(lines)
     for i, line in enumerate(lines):
-        task = _parse_task_from_line(line)
+        task = _parse_task_from_line(line, line_number=i + 1)
         if task is not None:
             indent_len = len(task.indent)
             while stack and stack[-1][0] >= indent_len:
