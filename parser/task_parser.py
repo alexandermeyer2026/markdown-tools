@@ -98,6 +98,5 @@ class TaskParser:
                             continue
 
                     owner.body = (owner.body + '\n' + content) if owner.body is not None else content
-                    owner.body_line_numbers.append(line_number)
 
         return tasks

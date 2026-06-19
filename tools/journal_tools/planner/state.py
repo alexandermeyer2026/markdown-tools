@@ -1,23 +1,46 @@
 import datetime
 import os
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from models import top_level_tasks
 from os_utils import FileFinder
-from parser import TaskParser
+from parser.file_model import RawLine, TaskBlock, parse, serialize
+
+
+def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            if node.task is task:
+                return node
+            result = _find_block_in(node.nodes, task)
+            if result is not None:
+                return result
+    return None
+
+
+def _populate_task_relations(nodes: list, parent_task=None) -> None:
+    """Walk the node tree, setting task.parent, task.children, and task.body."""
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            node.task.parent = parent_task
+            node.task.children = [n.task for n in node.nodes if isinstance(n, TaskBlock)]
+            # Collect raw body lines (non-task nodes), then fully dedent so that
+            # task.body matches what TaskFormScreen shows after textwrap.dedent().
+            body_lines = [n.raw.rstrip('\n') for n in node.nodes if isinstance(n, RawLine)]
+            body_text = textwrap.dedent('\n'.join(body_lines)).strip()
+            node.task.body = body_text if body_text else None
+            _populate_task_relations(node.nodes, node.task)
 
 
 @dataclass
 class DayCache:
     file_path: str | None
-    all_tasks: list          # original flat parse (for cut operations)
-    task_list: list          # current top-level tasks (mutable, shared with WeekState)
-    original_task_list: list # snapshot at load time (for change detection)
-    original_lines: dict     # {line_number: original to_line()} for status detection
-    original_bodies: dict = field(default_factory=dict)   # {line_number: body} snapshot
-    moved_subtasks: list = field(default_factory=list)    # subtasks removed from parents
-    deleted_tasks: list = field(default_factory=list)     # root tasks deleted in this day
+    nodes: list           # list[Node] — top-level node list (mutable)
+    original_content: str # serialized file content at load time
+    task_list: list       # [block.task for top-level TaskBlocks] — mutable by screens
+
+    def find_block(self, task) -> 'TaskBlock | None':
+        return _find_block_in(self.nodes, task)
 
 
 class PlannerState:
@@ -59,22 +82,18 @@ class PlannerState:
 
     def _load_into_state(self, key: str, file_path: str | None) -> None:
         if file_path and os.path.exists(file_path):
-            all_tasks = TaskParser.parse_file(file_path)
+            nodes = parse(file_path)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                original_content = f.read()
         else:
-            all_tasks = []
-        for t in all_tasks:
-            if t.body is not None:
-                t.body = textwrap.dedent(t.body).strip() or None
-        tl = list(top_level_tasks(all_tasks))
+            nodes = []
+            original_content = ''
+        _populate_task_relations(nodes)
         self._days[key] = DayCache(
             file_path=file_path,
-            all_tasks=all_tasks,
-            task_list=tl,
-            original_task_list=list(tl),
-            original_lines={t.line_number: t.to_line() for t in all_tasks},
-            original_bodies={
-                t.line_number: t.body for t in all_tasks if t.line_number > 0
-            },
+            nodes=nodes,
+            original_content=original_content,
+            task_list=[n.task for n in nodes if isinstance(n, TaskBlock)],
         )
 
 

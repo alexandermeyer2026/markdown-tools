@@ -12,270 +12,36 @@ import pytest
 
 from models import Task, TaskTime, minutes_to_time
 from os_utils import FileFinder, resolve_date
+from parser.file_model import serialize
 from tools.journal_tools.planner import WeekState, DayCache
 from tools.journal_tools.planner.app import PlannerApp
 from tools.journal_tools.planner.state import PlannerState
-from tools.journal_tools.planner.daily import save as planner_save, has_changes as planner_has_changes
 from tools.journal_tools.planner.day_screen import DayGrid
 from tools.journal_tools.planner.save_dialog import SaveDialog
 from tools.journal_tools.planner.task_form_screen import TaskFormScreen, TaskFormResult
 from tools.journal_tools.planner.week_screen import WeekGrid
-from tools.journal_tools.planner.utils import task_to_lines
-from tools.journal_tools.planner.weekly import cache_has_changes
+from tools.journal_tools.planner.weekly import (
+    append_block, cache_has_changes, remove_block, sort_timed_nodes, task_to_block,
+)
 
 JOURNAL_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'journal')
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures', 'planner')
 
 
 @pytest.mark.integration
-class TestSave(unittest.TestCase):
-    CONTENT = (
-        "# Journal\n"
-        "\n"
-        "- [ ] 9:00-10:00 Meeting\n"
-        "- [ ] Buy milk\n"
-    )
-
-    def setUp(self):
-        self.tmp = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.md', delete=False, encoding='utf-8'
-        )
-        self.tmp.write(self.CONTENT)
-        self.tmp.close()
-        self.path = self.tmp.name
-        self.directory = os.path.dirname(self.path)
-
-    def tearDown(self):
-        if os.path.exists(self.path):
-            os.unlink(self.path)
-        backup_dir = os.path.join(self.directory, '.backups')
-        if os.path.exists(backup_dir):
-            for f in os.listdir(backup_dir):
-                os.unlink(os.path.join(backup_dir, f))
-            os.rmdir(backup_dir)
-
-    def _read(self):
-        with open(self.path, encoding='utf-8') as f:
-            return f.read()
-
-    def test_unchanged_task_not_touched(self):
-        task = Task(title='Meeting', status='todo',
-                    time=TaskTime(start='9:00', end='10:00'), line_number=3, indent='')
-        planner_save(self.path, self.directory, [task], [],
-                          {3: task.to_line()}, [])
-        self.assertEqual(self._read(), self.CONTENT)
-
-    def test_task_with_unknown_line_number_not_written(self):
-        task = Task(title='Ghost', status='done', time=None, line_number=99, indent='')
-        planner_save(self.path, self.directory, [task], [], {}, [])
-        self.assertEqual(self._read(), self.CONTENT)
-
-    def test_backup_created(self):
-        planner_save(self.path, self.directory, [], [], {}, [])
-        backup_dir = os.path.join(self.directory, '.backups')
-        self.assertTrue(os.path.exists(backup_dir))
-        self.assertEqual(len(os.listdir(backup_dir)), 1)
-
-    def test_atomic_write_leaves_no_tmp(self):
-        planner_save(self.path, self.directory, [], [], {}, [])
-        self.assertFalse(os.path.exists(self.path + '.tmp'))
-
-    def test_delete_root_task(self):
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        meeting = tasks[0]
-        buy = tasks[1]
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        planner_save(self.path, self.directory, [meeting], [], original_lines, [], [buy])
-        result = self._read()
-        self.assertIn('Meeting', result)
-        self.assertNotIn('Buy milk', result)
-
-    def test_delete_root_task_with_subtasks(self):
-        content = (
-            "- [ ] Buy milk\n"
-            "  - [ ] Bread\n"
-            "  - [ ] Eggs\n"
-            "- [ ] Call dentist\n"
-        )
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        buy, bread, eggs, dentist = tasks
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        planner_save(self.path, self.directory, [], [dentist], original_lines, [], [buy])
-        result = self._read()
-        self.assertNotIn('Buy milk', result)
-        self.assertNotIn('Bread', result)
-        self.assertNotIn('Eggs', result)
-        self.assertIn('Call dentist', result)
-
-    def test_delete_subtask(self):
-        content = (
-            "- [ ] Buy milk\n"
-            "  - [ ] Bread\n"
-            "  - [ ] Eggs\n"
-            "- [ ] Call dentist\n"
-        )
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        buy, bread, eggs, dentist = tasks
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        buy.children.remove(bread)
-        planner_save(self.path, self.directory, [], [buy], original_lines, [], [bread])
-        result = self._read()
-        self.assertIn('Buy milk', result)
-        self.assertNotIn('Bread', result)
-        self.assertIn('Eggs', result)
-        self.assertIn('Call dentist', result)
-
-    def test_new_task_with_body_written_to_file(self):
-        new_task = Task(title='Dentist', status='todo', time=None, line_number=-1, indent='',
-                        body='Bring insurance card')
-        planner_save(self.path, self.directory, [], [], {}, [new_task])
-        result = self._read()
-        self.assertIn('- [ ] Dentist\n', result)
-        self.assertIn('    Bring insurance card\n', result)
-        lines = result.splitlines()
-        task_idx = next(i for i, l in enumerate(lines) if 'Dentist' in l)
-        self.assertEqual(lines[task_idx + 1], '    Bring insurance card')
-
-    def test_new_task_multiline_body_written(self):
-        new_task = Task(title='Plan', status='todo', time=None, line_number=-1, indent='',
-                        body='Line one\nLine two')
-        planner_save(self.path, self.directory, [], [], {}, [new_task])
-        result = self._read()
-        self.assertIn('    Line one\n', result)
-        self.assertIn('    Line two\n', result)
-
-    def test_edit_task_body_updates_file(self):
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write("- [ ] Task A\n    Old notes\n- [ ] Task B\n")
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        task_a, task_b = tasks[0], tasks[1]
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        original_bodies = {t.line_number: t.body for t in tasks}
-        task_a.body = 'New notes'
-        planner_save(self.path, self.directory, [], [task_a, task_b],
-                     original_lines, [], original_bodies=original_bodies)
-        result = self._read()
-        self.assertNotIn('Old notes', result)
-        self.assertIn('New notes', result)
-        self.assertIn('Task A', result)
-        self.assertIn('Task B', result)
-
-    def test_clearing_task_body_removes_lines(self):
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write("- [ ] Task A\n    Some notes\n- [ ] Task B\n")
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        task_a, task_b = tasks[0], tasks[1]
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        original_bodies = {t.line_number: t.body for t in tasks}
-        task_a.body = None
-        planner_save(self.path, self.directory, [], [task_a, task_b],
-                     original_lines, [], original_bodies=original_bodies)
-        result = self._read()
-        self.assertNotIn('Some notes', result)
-        self.assertIn('Task A', result)
-        self.assertIn('Task B', result)
-
-    def test_new_task_on_file_with_trailing_blank_has_single_gap(self):
-        # File ending with a trailing blank line must not produce a double blank gap
-        # before the new task. sort_timed_tasks only fixes this when >=2 timed tasks
-        # exist; with an untimed file the bug survives unfixed.
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write("- [ ] Buy milk\n\n")
-        new_task = Task(title='Call dentist', status='todo', time=None, line_number=-1, indent='')
-        planner_save(self.path, self.directory, [], [], {}, [new_task])
-        self.assertEqual(self._read(), "- [ ] Buy milk\n\n- [ ] Call dentist\n")
-
-
-class TestHasChanges(unittest.TestCase):
-    CONTENT = (
-        "# Journal\n"
-        "\n"
-        "- [ ] Buy milk\n"
-        "  - [ ] Sub task\n"
-    )
-
-    def setUp(self):
-        self.tmp = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.md', delete=False, encoding='utf-8'
-        )
-        self.tmp.write(self.CONTENT)
-        self.tmp.close()
-        self.path = self.tmp.name
-        from parser.task_parser import TaskParser
-        self.tasks = TaskParser.parse_file(self.path)
-
-    def tearDown(self):
-        if os.path.exists(self.path):
-            os.unlink(self.path)
-
-    def test_subtask_status_change_detected(self):
-        parent = self.tasks[0]
-        child  = self.tasks[1]
-        original_lines = {t.line_number: t.to_line() for t in self.tasks}
-        self.assertFalse(planner_has_changes([parent], [], original_lines, []))
-        child.status = 'done'
-        self.assertTrue(planner_has_changes([parent], [], original_lines, []))
-
-    def test_deleted_task_detected(self):
-        parent = self.tasks[0]
-        original_lines = {t.line_number: t.to_line() for t in self.tasks}
-        self.assertFalse(planner_has_changes([parent], [], original_lines, []))
-        self.assertTrue(planner_has_changes([parent], [], original_lines, [], [parent]))
-
-    def test_body_change_detected(self):
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write("- [ ] Task\n    Some notes\n")
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        task = tasks[0]
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        original_bodies = {t.line_number: t.body for t in tasks}
-        self.assertFalse(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
-        task.body = 'Changed notes'
-        self.assertTrue(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
-
-    def test_body_cleared_detected(self):
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write("- [ ] Task\n    Some notes\n")
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        task = tasks[0]
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        original_bodies = {t.line_number: t.body for t in tasks}
-        task.body = None
-        self.assertTrue(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
-
-    def test_body_unchanged_not_detected(self):
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.write("- [ ] Task\n    Some notes\n")
-        from parser.task_parser import TaskParser
-        tasks = TaskParser.parse_file(self.path)
-        task = tasks[0]
-        original_lines = {t.line_number: t.to_line() for t in tasks}
-        original_bodies = {t.line_number: t.body for t in tasks}
-        self.assertFalse(planner_has_changes([task], [], original_lines, [], original_bodies=original_bodies))
 
 
 class TestWeekCacheChanges(unittest.TestCase):
 
     def _make_cache(self, tasks):
         tl = [t for t in tasks if t.parent is None]
+        nodes = [task_to_block(t) for t in tl]
         return {
             '2024-01-15': DayCache(
                 file_path=None,
-                all_tasks=tasks,
+                nodes=nodes,
+                original_content=serialize(nodes),
                 task_list=tl,
-                original_task_list=list(tl),
-                original_lines={t.line_number: t.to_line() for t in tasks if t.line_number > 0},
             )
         }
 
@@ -291,6 +57,7 @@ class TestWeekCacheChanges(unittest.TestCase):
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
         cache = self._make_cache([parent])
         parent.status = 'done'
+        cache['2024-01-15'].find_block(parent).refresh_header()
         self.assertTrue(cache_has_changes(cache))
 
     def test_subtask_status_change_detected(self):
@@ -300,6 +67,7 @@ class TestWeekCacheChanges(unittest.TestCase):
         child.parent = parent
         cache = self._make_cache([parent, child])
         child.status = 'done'
+        cache['2024-01-15'].find_block(child).refresh_header()
         self.assertTrue(cache_has_changes(cache))
 
 
@@ -334,12 +102,12 @@ class TestPlannerState(unittest.TestCase):
         self.assertEqual(day.task_list, [])
         self.assertIsNone(day.file_path)
 
-    def test_original_bodies_populated_on_load(self):
+    def test_task_body_populated_on_load(self):
         state = PlannerState(self.tmpdir)
         day = state.load_day(self.date)
         task_a = day.task_list[0]
-        self.assertIn(task_a.line_number, day.original_bodies)
-        self.assertIn('Some notes', day.original_bodies[task_a.line_number])
+        self.assertIsNotNone(task_a.body)
+        self.assertIn('Some notes', task_a.body)
 
     def test_reload_discards_in_memory_mutations(self):
         state = PlannerState(self.tmpdir)
@@ -352,57 +120,24 @@ class TestPlannerState(unittest.TestCase):
         self.assertEqual(len(state.days[key].task_list), 2)
         self.assertNotIn('Ephemeral', [t.title for t in state.days[key].task_list])
 
-    def test_reload_refreshes_original_lines(self):
+    def test_reload_refreshes_original_content(self):
         state = PlannerState(self.tmpdir)
         key = self.date.isoformat()
         state.load_day(self.date)
-        count_before = len(state.days[key].original_lines)
+        len_before = len(state.days[key].original_content)
         with open(self.path, 'a', encoding='utf-8') as f:
             f.write("- [ ] Task C\n")
         state.reload_day_by_key(key)
-        self.assertGreater(len(state.days[key].original_lines), count_before)
+        self.assertGreater(len(state.days[key].original_content), len_before)
 
-    def test_original_bodies_stores_dedented_body(self):
-        # File has "    Some notes" (raw indented); after load both task.body and
-        # original_bodies must be dedented so no spurious diff fires on the first save.
+    def test_task_body_dedented_on_load(self):
+        # File has "    Some notes" (raw indented); task.body must be fully dedented
+        # so TaskFormScreen shows unindented text and round-trip doesn't mark dirty.
         state = PlannerState(self.tmpdir)
         day = state.load_day(self.date)
         task_a = day.task_list[0]
         self.assertEqual(task_a.body, 'Some notes')
-        self.assertEqual(day.original_bodies[task_a.line_number], 'Some notes')
 
-
-class TestTaskToLines(unittest.TestCase):
-    def test_simple_todo(self):
-        task = Task(title='Buy milk', status='todo', time=None, line_number=1, indent='')
-        self.assertEqual(task_to_lines(task), ['- [ ] Buy milk\n'])
-
-    def test_done_task(self):
-        task = Task(title='Buy milk', status='done', time=None, line_number=1, indent='')
-        self.assertEqual(task_to_lines(task), ['- [x] Buy milk\n'])
-
-    def test_timed_task(self):
-        task = Task(title='Meeting', status='todo',
-                    time=TaskTime(start='9:00', end='10:00'), line_number=1, indent='')
-        self.assertEqual(task_to_lines(task), ['- [ ] 9:00-10:00 Meeting\n'])
-
-    def test_with_child(self):
-        child = Task(title='Sub', status='done', time=None, line_number=2, indent='  ')
-        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        child.parent = parent
-        self.assertEqual(task_to_lines(parent), ['- [ ] Parent\n', '  - [x] Sub\n'])
-
-    def test_deeply_nested(self):
-        grandchild = Task(title='Leaf', status='todo', time=None, line_number=3, indent='    ')
-        child = Task(title='Mid', status='todo', time=None, line_number=2, indent='  ',
-                     children=[grandchild])
-        parent = Task(title='Root', status='todo', time=None, line_number=1, indent='',
-                      children=[child])
-        grandchild.parent = child
-        child.parent = parent
-        self.assertEqual(task_to_lines(parent),
-                         ['- [ ] Root\n', '  - [ ] Mid\n', '    - [ ] Leaf\n'])
 
 
 @pytest.mark.integration
@@ -521,6 +256,7 @@ class PlannerIntegrationTest(unittest.TestCase):
         self._run_fixture('week_status_change_saved')
 
 
+@pytest.mark.integration
 class TestDayGridInteraction(unittest.TestCase):
     """Pilot-driven tests for DayScreen time-manipulation and quit logic."""
 
@@ -669,7 +405,7 @@ class TestDayGridInteraction(unittest.TestCase):
             self.assertEqual(f.read(), content_before)
 
     async def _change_and_save(self, change_keys):
-        """Press change_keys, save with ctrl+s + confirm, return grid snapshot."""
+        """Press change_keys, save with ctrl+s + confirm, return has_changes flag."""
         app = PlannerApp(self.directory, file_path=self.path)
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -681,17 +417,15 @@ class TestDayGridInteraction(unittest.TestCase):
                 await pilot.click('#yes')
                 await pilot.pause()
             grid = app.screen.query_one(DayGrid)
-            return grid._has_changes(), list(grid._new_tasks), list(grid._deleted_tasks)
+            return grid._has_changes()
 
     def test_save_clears_dirty_flag_after_status_change(self):
-        # Regression: _original_lines was not reloaded after save, leaving the
-        # dirty flag set so the user could keep re-saving with no visible effect.
-        has_chg, _, _ = asyncio.run(self._change_and_save(['d']))
+        has_chg = asyncio.run(self._change_and_save(['d']))
         self.assertFalse(has_chg)
 
-    def test_save_clears_new_tasks_list_to_prevent_duplicates(self):
-        # Regression: _new_tasks was not cleared after save, so a second save
-        # would append the task again and produce duplicates in the file.
+    def test_save_no_duplicate_on_second_save(self):
+        # Regression: with the old line-number model, _new_tasks was not cleared
+        # after save, so a second save would append the task again.
         from textual.widgets import Input
 
         async def run():
@@ -709,11 +443,10 @@ class TestDayGridInteraction(unittest.TestCase):
                     await pilot.click('#yes')
                     await pilot.pause()
                 grid = app.screen.query_one(DayGrid)
-                return grid._has_changes(), list(grid._new_tasks)
+                return grid._has_changes()
 
-        has_chg, new_tasks = asyncio.run(run())
+        has_chg = asyncio.run(run())
         self.assertFalse(has_chg)
-        self.assertEqual(new_tasks, [])
         with open(self.path) as f:
             self.assertEqual(f.read().count('Regression task'), 1)
 
@@ -1321,9 +1054,7 @@ class TestWeekGridBodySave(unittest.TestCase):
         self.assertIn('Task B', content)
 
     def test_unchanged_note_not_dirty(self):
-        """Opening a task form and saving without changes must not mark the cache dirty.
-        Regression: raw-indented body in original_bodies vs dedented post-form body
-        always compared unequal and triggered a spurious rewrite."""
+        """Opening a task form and saving without changes must not mark the cache dirty."""
 
         async def run():
             with self._patch_today():
@@ -1365,7 +1096,9 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
             day.task_list.remove(task)
         else:
             task.parent.children.remove(task)
-        day.deleted_tasks.append(task)
+        block = day.find_block(task)
+        if block:
+            remove_block(day.nodes, block)
         save_cache(state.days, self.tmpdir)
 
     def test_delete_root_task_preserves_blank_line(self):
@@ -1401,18 +1134,10 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
     """Regression tests for note doubling / task disappearance after shifting
     a timed task into a day that already has timed tasks.
 
-    The bug: sort_timed_tasks reorders the newly arrived task to line 1 —
-    the same slot originally occupied by the destination day's own task.
-    _refresh_line_numbers updated line_number but left body_line_numbers and
-    original_bodies stale, so cache_has_changes fired a false positive, and a
-    second save_cache removed the wrong lines (task disappeared) and inserted
-    the body a second time (note doubled).
-
-    Setup: Day A has two untimed tasks then a timed 10:00 task with a note
-    (so task A lives at line 3, body at line 4).  Day B has a single timed
-    11:00 task with a note at line 1.  After shifting task A to day B,
-    sort_timed_tasks moves task A to line 1 and task B to line 4 — exactly
-    where task A's stale body_line_numbers pointed."""
+    Setup: Day A has two untimed tasks then a timed 10:00 task with a note.
+    Day B has a single timed 11:00 task with a note.  After shifting task A
+    to day B, sort_timed_nodes reorders the blocks; a second save_cache call
+    must be a no-op (no corruption, no false dirty flag)."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -1437,26 +1162,27 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
         date_b = datetime.date(2024, 1, 10)
         state.load_day(date_a)
         state.load_day(date_b)
-        task_a = state.days[date_a.isoformat()].task_list[2]  # 10:00 Task A
-        state.days[date_a.isoformat()].task_list.remove(task_a)
-        state.days[date_b.isoformat()].task_list.append(task_a)
+        cache_a = state.days[date_a.isoformat()]
+        cache_b = state.days[date_b.isoformat()]
+        task_a = cache_a.task_list[2]  # 10:00 Task A
+        block_a = cache_a.find_block(task_a)
+        cache_a.task_list.remove(task_a)
+        cache_b.task_list.append(task_a)
+        if block_a:
+            remove_block(cache_a.nodes, block_a)
+            append_block(cache_b.nodes, block_a)
+            if task_a.time:
+                sort_timed_nodes(cache_b.nodes)
         save_cache(state.days, self.tmpdir)
         return state, save_cache
 
     def test_no_spurious_dirty_flag_after_timed_shift(self):
-        """cache_has_changes must be False right after the first save_cache.
-
-        Regression: stale original_bodies caused a false positive that
-        triggered an unnecessary second save dialog."""
+        """cache_has_changes must be False right after the first save_cache."""
         state, _ = self._shift_and_save()
         self.assertFalse(cache_has_changes(state.days))
 
     def test_no_data_corruption_on_resave_after_timed_shift(self):
-        """Calling save_cache a second time must not double the note or
-        remove task B.
-
-        Regression: stale body_line_numbers pointed at task B's header line,
-        so the second save removed task B and inserted task A's note twice."""
+        """Calling save_cache a second time must not double the note or remove task B."""
         state, save_cache = self._shift_and_save()
         save_cache(state.days, self.tmpdir)  # second call — must be a no-op
         content = self._read('2024-01-10')

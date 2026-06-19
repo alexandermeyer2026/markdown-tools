@@ -1,0 +1,219 @@
+import os
+import tempfile
+import unittest
+
+import pytest
+
+from parser.file_model import RawLine, TaskBlock, parse, serialize
+
+
+def write_temp(content: str) -> str:
+    f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, encoding='utf-8')
+    f.write(content)
+    f.close()
+    return f.name
+
+
+def roundtrip(content: str) -> str:
+    path = write_temp(content)
+    try:
+        return serialize(parse(path))
+    finally:
+        os.unlink(path)
+
+
+def parse_str(content: str) -> list:
+    path = write_temp(content)
+    try:
+        return parse(path)
+    finally:
+        os.unlink(path)
+
+
+# ── Round-trip ────────────────────────────────────────────────────────────────
+
+@pytest.mark.integration
+class TestRoundTrip(unittest.TestCase):
+
+    def test_empty_file(self):
+        self.assertEqual(roundtrip(''), '')
+
+    def test_single_task(self):
+        c = '- [ ] Task\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_task_with_body(self):
+        c = '- [ ] Task\n  Note\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_two_tasks_blank_separator(self):
+        c = '- [ ] Task A\n\n- [ ] Task B\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_subtask(self):
+        c = '- [ ] Parent\n  - [ ] Child\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_interleaved_notes_and_subtasks(self):
+        c = (
+            '- [ ] Parent\n'
+            '  First note\n'
+            '  - [ ] Child 1\n'
+            '  Middle note\n'
+            '  - [ ] Child 2\n'
+            '  Last note\n'
+        )
+        self.assertEqual(roundtrip(c), c)
+
+    def test_prose_before_tasks(self):
+        c = '# Heading\n\n- [ ] Task\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_blank_line_within_body(self):
+        c = '- [ ] Task\n  Note 1\n\n  Note 2\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_trailing_blank_line(self):
+        c = '- [ ] Task\n\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_poorly_formatted_indentation(self):
+        c = (
+            '- [ ] Parent\n'
+            '    Parent note\n'
+            '  - [ ] Child 1\n'
+            '    Child 1 note\n'
+            '      Child 1 note\n'
+            ' - [ ] Child 2\n'
+            '  - [ ] Grandchild\n'
+        )
+        self.assertEqual(roundtrip(c), c)
+
+    def test_timed_task(self):
+        c = '- [ ] 10:00-11:00 Meeting\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_fixture_files(self):
+        fixtures = os.path.join(os.path.dirname(__file__), '..', 'fixtures', 'journal')
+        for fname in sorted(os.listdir(fixtures)):
+            if not fname.endswith('.md'):
+                continue
+            path = os.path.join(fixtures, fname)
+            with open(path, 'r', encoding='utf-8') as f:
+                original = f.read()
+            self.assertEqual(serialize(parse(path)), original, f'round-trip failed: {fname}')
+
+
+# ── Structure ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.integration
+class TestStructure(unittest.TestCase):
+
+    def test_single_task_is_taskblock(self):
+        nodes = parse_str('- [ ] Task\n')
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], TaskBlock)
+
+    def test_task_title(self):
+        nodes = parse_str('- [ ] My title\n')
+        self.assertEqual(nodes[0].task.title, 'My title')
+
+    def test_task_status(self):
+        nodes = parse_str('- [x] Done\n')
+        self.assertEqual(nodes[0].task.status, 'done')
+
+    def test_task_indent(self):
+        nodes = parse_str('- [ ] Parent\n  - [ ] Child\n')
+        self.assertEqual(nodes[0].task.indent, '')
+        self.assertEqual(nodes[0].nodes[0].task.indent, '  ')
+
+    def test_header_exact(self):
+        nodes = parse_str('- [x] Done task\n')
+        self.assertEqual(nodes[0].header, '- [x] Done task\n')
+
+    def test_body_rawline_exact(self):
+        nodes = parse_str('- [ ] Task\n  Note\n')
+        self.assertIsInstance(nodes[0].nodes[0], RawLine)
+        self.assertEqual(nodes[0].nodes[0].raw, '  Note\n')
+
+    def test_subtask_nested(self):
+        nodes = parse_str('- [ ] Parent\n  - [ ] Child\n')
+        self.assertIsInstance(nodes[0].nodes[0], TaskBlock)
+        self.assertEqual(nodes[0].nodes[0].task.title, 'Child')
+
+    def test_interleaved_order(self):
+        nodes = parse_str(
+            '- [ ] Parent\n'
+            '  First\n'
+            '  - [ ] Child\n'
+            '  Last\n'
+        )
+        parent = nodes[0]
+        self.assertIsInstance(parent.nodes[0], RawLine)
+        self.assertIsInstance(parent.nodes[1], TaskBlock)
+        self.assertIsInstance(parent.nodes[2], RawLine)
+
+    def test_blank_between_tasks_in_first_body(self):
+        nodes = parse_str('- [ ] A\n\n- [ ] B\n')
+        # blank separator between top-level tasks is promoted to top-level
+        self.assertEqual(len(nodes), 3)
+        self.assertIsInstance(nodes[0], TaskBlock)
+        self.assertIsInstance(nodes[1], RawLine)
+        self.assertEqual(nodes[1].raw, '\n')
+        self.assertIsInstance(nodes[2], TaskBlock)
+        self.assertEqual(nodes[2].task.title, 'B')
+
+    def test_top_level_prose_rawline(self):
+        nodes = parse_str('# Heading\n\n- [ ] Task\n')
+        self.assertIsInstance(nodes[0], RawLine)
+        self.assertEqual(nodes[0].raw, '# Heading\n')
+        self.assertIsInstance(nodes[1], RawLine)
+        self.assertEqual(nodes[1].raw, '\n')
+        self.assertIsInstance(nodes[2], TaskBlock)
+
+    def test_empty_file_empty_list(self):
+        nodes = parse_str('')
+        self.assertEqual(nodes, [])
+
+    def test_timed_task_parsed(self):
+        nodes = parse_str('- [ ] 09:00-10:00 Meeting\n')
+        t = nodes[0].task
+        self.assertEqual(t.title, 'Meeting')
+        self.assertIsNotNone(t.time)
+        self.assertEqual(t.time.start, '09:00')
+        self.assertEqual(t.time.end, '10:00')
+
+
+# ── refresh_header ────────────────────────────────────────────────────────────
+
+@pytest.mark.integration
+class TestRefreshHeader(unittest.TestCase):
+
+    def test_refresh_updates_header(self):
+        nodes = parse_str('- [ ] Task\n')
+        block = nodes[0]
+        block.task.status = 'done'
+        block.refresh_header()
+        self.assertEqual(block.header, '- [x] Task\n')
+
+    def test_serialize_after_refresh(self):
+        nodes = parse_str('- [ ] Task\n')
+        nodes[0].task.status = 'done'
+        nodes[0].refresh_header()
+        self.assertEqual(serialize(nodes), '- [x] Task\n')
+
+    def test_refresh_preserves_body(self):
+        nodes = parse_str('- [ ] Task\n  Note\n')
+        nodes[0].task.status = 'done'
+        nodes[0].refresh_header()
+        self.assertEqual(serialize(nodes), '- [x] Task\n  Note\n')
+
+    def test_unmodified_header_unchanged(self):
+        original = '- [ ] Task\n'
+        nodes = parse_str(original)
+        # no refresh_header called — header must still be the original line
+        self.assertEqual(nodes[0].header, original)
+
+
+if __name__ == '__main__':
+    unittest.main()

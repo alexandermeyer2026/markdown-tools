@@ -10,14 +10,19 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime
+from parser.file_model import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import PlannerState, WeekState
 from .utils import week_expanded, root_task, fix_parent_refs
 from .weekly import (
     DAY_NAMES,
+    append_block,
     cache_has_changes,
+    remove_block,
     save_cache,
     shift_task,
+    sync_body_to_block,
+    task_to_block,
 )
 
 _MARGIN = "  "
@@ -245,6 +250,9 @@ class WeekGrid(Widget, can_focus=True):
         task = self._selected_task()
         if task:
             task.status = status
+            block = self._planner.days[self._selected_day().isoformat()].find_block(task)
+            if block:
+                block.refresh_header()
             self.refresh()
 
     def action_status_todo(self)        -> None: self._set_status("todo")
@@ -295,8 +303,20 @@ class WeekGrid(Widget, can_focus=True):
         unfinished = [c for c in task.children if c.status not in ("done", "failed", "started")]
         if not unfinished:
             return
+
+        # Remove unfinished subtask blocks from the source day's node tree
+        src_cache = self._state.day(self.cursor_col)
+        src_block = src_cache.find_block(task)
+        unfinished_blocks = []
+        if src_block:
+            unfinished_blocks = [src_cache.find_block(c) for c in unfinished]
+            unfinished_blocks = [b for b in unfinished_blocks if b is not None]
+            for ub in unfinished_blocks:
+                if ub in src_block.nodes:
+                    src_block.nodes.remove(ub)
+
         task.children = [c for c in task.children if c.status in ("done", "failed", "started")]
-        self._state.day(self.cursor_col).moved_subtasks.extend(unfinished)
+
         tomorrow = self._state.week_days[self.cursor_col] + datetime.timedelta(days=1)
         self._planner.load_day(tomorrow)
         new_task = Task(
@@ -309,7 +329,15 @@ class WeekGrid(Widget, can_focus=True):
         )
         for child in unfinished:
             child.parent = new_task
-        self._planner.days[tomorrow.isoformat()].task_list.append(new_task)
+
+        new_block = TaskBlock(
+            task=new_task,
+            header=new_task.to_line() + '\n',
+            nodes=list(unfinished_blocks),
+        )
+        dst_cache = self._planner.days[tomorrow.isoformat()]
+        append_block(dst_cache.nodes, new_block)
+        dst_cache.task_list.append(new_task)
         self.refresh()
 
     def action_delete_task(self) -> None:
@@ -322,8 +350,9 @@ class WeekGrid(Widget, can_focus=True):
             day_cache.task_list.remove(task)
         else:
             task.parent.children.remove(task)
-        if task.line_number > 0:
-            day_cache.deleted_tasks.append(task)
+        block = day_cache.find_block(task)
+        if block:
+            remove_block(day_cache.nodes, block)
         self._clamp_row()
         self.refresh()
 
@@ -377,6 +406,7 @@ class WeekGrid(Widget, can_focus=True):
 
     def _edit_task(self, task: Task) -> None:
         from .task_form_screen import TaskFormScreen, TaskFormResult
+        day_key = self._selected_day().isoformat()
 
         def on_form_result(result: TaskFormResult | None) -> None:
             if result is not None:
@@ -391,6 +421,10 @@ class WeekGrid(Widget, can_focus=True):
                 else:
                     task.time = None
                 fix_parent_refs(task.children, task)
+                block = self._planner.days[day_key].find_block(task)
+                if block:
+                    block.refresh_header()
+                    sync_body_to_block(block, task)
             self.call_after_refresh(self.refresh)
 
         self.app.push_screen(TaskFormScreen(task), on_form_result)
@@ -422,7 +456,10 @@ class WeekGrid(Widget, can_focus=True):
                 children=result.subtasks,
             )
             fix_parent_refs(new_task.children, new_task)
-            self._planner.days[day_key].task_list.append(new_task)
+            new_block = task_to_block(new_task)
+            day_cache = self._planner.days[day_key]
+            append_block(day_cache.nodes, new_block)
+            day_cache.task_list.append(new_task)
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(), on_form_result)
