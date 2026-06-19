@@ -99,21 +99,10 @@ def parse(file_path: str) -> list[Node]:
             current_nodes().append(block)
             stack.append((indent_len, block))
         elif not line.strip():
-            # Blank line: if we're inside a top-level task and the next non-blank
-            # line starts a new top-level task, promote to top-level so that
-            # task blocks can be reordered without dragging their separator along.
-            goes_top = False
-            if stack and stack[0][0] == 0:
-                for j in range(i + 1, n_lines):
-                    if lines[j].strip():
-                        ahead = _parse_task_from_line(lines[j])
-                        if ahead is not None and len(ahead.indent) == 0:
-                            goes_top = True
-                        break
-            if goes_top:
-                top_level.append(RawLine(line))
-            else:
-                current_nodes().append(RawLine(line))
+            # Blank line belongs to the preceding node: stored in current_nodes(),
+            # which points to the preceding task's nodes when we are between tasks.
+            # Leading blanks (before any task) land in top_level via current_nodes().
+            current_nodes().append(RawLine(line))
         else:
             # non-task content: find deepest task with indent strictly less than this line
             line_indent_len = len(re.match(r'^(\s*)', line).group(1))

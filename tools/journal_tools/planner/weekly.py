@@ -154,9 +154,7 @@ def remove_block(nodes: list, block: TaskBlock) -> bool:
 
 
 def append_block(nodes: list, block: TaskBlock) -> None:
-    """Append a TaskBlock with a blank-line separator when the list is non-empty."""
-    if nodes:
-        nodes.append(RawLine('\n'))
+    """Append a TaskBlock to the node list."""
     nodes.append(block)
 
 
@@ -169,22 +167,9 @@ def sort_timed_nodes(nodes: list) -> None:
     sorted_blocks = timed + untimed
     if sorted_blocks == blocks:
         return
-    has_separator = any(
-        isinstance(nodes[i], RawLine) and not nodes[i].raw.strip()
-        and any(isinstance(nodes[j], TaskBlock) for j in range(i))
-        and any(isinstance(nodes[j], TaskBlock) for j in range(i + 1, len(nodes)))
-        for i in range(len(nodes))
-    )
-    first_block_idx = next((i for i, n in enumerate(nodes) if isinstance(n, TaskBlock)), len(nodes))
-    leading = nodes[:first_block_idx]
-    task_section = []
-    for i, block in enumerate(sorted_blocks):
-        if i > 0 and has_separator:
-            task_section.append(RawLine('\n'))
-        task_section.append(block)
-    nodes.clear()
-    nodes.extend(leading)
-    nodes.extend(task_section)
+    block_positions = [i for i, n in enumerate(nodes) if isinstance(n, TaskBlock)]
+    for pos, block in zip(block_positions, sorted_blocks):
+        nodes[pos] = block
 
 
 def task_to_block(task: Task, body: str | None = None, subtask_blocks: list | None = None) -> TaskBlock:

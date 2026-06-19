@@ -155,13 +155,15 @@ class TestStructure(unittest.TestCase):
 
     def test_blank_between_tasks_in_first_body(self):
         nodes = parse_str('- [ ] A\n\n- [ ] B\n')
-        # blank separator between top-level tasks is promoted to top-level
-        self.assertEqual(len(nodes), 3)
+        # blank belongs to the preceding task's nodes, not the top-level list
+        self.assertEqual(len(nodes), 2)
         self.assertIsInstance(nodes[0], TaskBlock)
-        self.assertIsInstance(nodes[1], RawLine)
-        self.assertEqual(nodes[1].raw, '\n')
-        self.assertIsInstance(nodes[2], TaskBlock)
-        self.assertEqual(nodes[2].task.title, 'B')
+        self.assertEqual(nodes[0].task.title, 'A')
+        self.assertEqual(len(nodes[0].nodes), 1)
+        self.assertIsInstance(nodes[0].nodes[0], RawLine)
+        self.assertEqual(nodes[0].nodes[0].raw, '\n')
+        self.assertIsInstance(nodes[1], TaskBlock)
+        self.assertEqual(nodes[1].task.title, 'B')
 
     def test_top_level_prose_rawline(self):
         nodes = parse_str('# Heading\n\n- [ ] Task\n')

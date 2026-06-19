@@ -1110,7 +1110,7 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
         remove_block(day.nodes, block)
         save_cache(state.days, self.tmpdir)
 
-    def test_delete_root_task_preserves_blank_line(self):
+    def test_delete_root_task_removes_owned_blank_line(self):
         self._write("- [ ] Task A\n\n- [ ] Task B\n")
         state = PlannerState(self.tmpdir)
         state.load_day(datetime.date(2024, 3, 15))
@@ -1119,13 +1119,13 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
         content = self._read()
         self.assertNotIn('Task A', content)
         self.assertIn('Task B', content)
-        # blank line was between Task A and Task B; after Task A is removed it
-        # becomes a leading blank — verify it was not consumed by the deletion
-        self.assertTrue(content.startswith('\n'))
+        # blank belonged to Task A (preceding task owns trailing blanks) and
+        # travels with it on deletion — Task B has no leading blank
+        self.assertEqual(content, '- [ ] Task B\n')
 
-    def test_delete_subtask_preserves_blank_line(self):
-        # Mirrors the live regression: a sub-task written by block-rewrite gets a
-        # real line_number; deleting it must not consume the blank line that follows.
+    def test_delete_subtask_removes_owned_blank_line(self):
+        # Blank line after Sub belongs to Sub (preceding task owns trailing blanks).
+        # Deleting Sub removes the blank along with it.
         self._write("- [ ] Parent\n    - [ ] Sub\n\n- [ ] Task B\n")
         state = PlannerState(self.tmpdir)
         state.load_day(datetime.date(2024, 3, 15))
@@ -1136,7 +1136,7 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
         self.assertNotIn('Sub', content)
         self.assertIn('Parent', content)
         self.assertIn('Task B', content)
-        self.assertIn('\n\n', content)
+        self.assertNotIn('\n\n', content)
 
 
 class TestWeekSaveCacheTimedShift(unittest.TestCase):
