@@ -248,8 +248,8 @@ class DayGrid(Widget, can_focus=True):
                 t.append(child.title[:title_max], style="reverse")
             else:
                 t.append(leading)
-                t.append(icon, style="bright_black")
-                t.append(f" {child.title[:title_max]}", style="bright_black")
+                t.append(icon, style=STATUS_STYLES.get(child.status, "bright_black"))
+                t.append(f" {child.title[:title_max]}")
             rows.append(t)
             rows.extend(self._body_rows(child_block, depth, time_offset))
             rows.extend(self._subtask_rows(child_block, selected, depth + 1, time_offset))

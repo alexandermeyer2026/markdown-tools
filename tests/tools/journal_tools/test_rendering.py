@@ -3,7 +3,7 @@ import unittest
 from models import Task, TaskTime
 from parser.file_model import RawLine, TaskBlock
 from tools.journal_tools.rendering import (
-    GRAY, RESET, STATUS_ICONS,
+    GRAY, RESET, STATUS_COLORS, STATUS_ICONS,
     ansi_truncate_pad, get_time_slot, scale_lines, subtask_rows,
 )
 
@@ -120,7 +120,7 @@ class TestSubtaskRows(unittest.TestCase):
         row = subtask_rows(parent_block)[0]
         self.assertIn(STATUS_ICONS['done'], row)
         self.assertIn('Buy milk', row)
-        self.assertIn(GRAY, row)
+        self.assertIn(STATUS_COLORS['done'], row)
         self.assertNotIn('\x1b[7m', row)
 
     def test_selected_child_has_reverse_highlight(self):

@@ -168,10 +168,10 @@ class WeekGrid(Widget, can_focus=True):
                 t.append("> ")
                 t.append(icon)
             else:
-                t.append(indent, style="bright_black")
-                t.append(icon, style="bright_black")
+                t.append(indent)
+                t.append(icon, style=style)
             t.append(" ")
-            t.append(title_str, style="reverse" if is_selected else "bright_black")
+            t.append(title_str, style="reverse" if is_selected else "")
             return t
 
         title_max = col_width - 4

@@ -129,7 +129,8 @@ def subtask_rows(block: TaskBlock, left_pad: int = 0, depth: int = 1, selected_t
         if child is selected_task:
             rows.append(f"{indent[:-2]}\x1b[7m> {icon} {child.title}{RESET}")
         else:
-            rows.append(f"{indent}{GRAY}{icon} {child.title}{RESET}")
+            status_color = STATUS_COLORS.get(child.status, GRAY)
+            rows.append(f"{indent}{status_color}{icon}{RESET} {child.title}")
         rows.extend(body_rows(child_block, left_pad, depth))
         rows.extend(subtask_rows(child_block, left_pad, depth + 1, selected_task))
     return rows
