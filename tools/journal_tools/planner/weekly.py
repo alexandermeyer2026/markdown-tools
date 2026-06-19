@@ -17,37 +17,27 @@ def ensure_day_loaded(cache: dict, day: datetime.date, directory: str) -> DayCac
         files = FileFinder.find_journal_files(directory, date_from=day, date_to=day)
         if files:
             nodes = parse(files[0])
-            with open(files[0], 'r', encoding='utf-8') as f:
-                original_content = f.read()
-            cache[key] = DayCache(
-                file_path=files[0],
-                nodes=nodes,
-                original_content=original_content,
-            )
+            cache[key] = DayCache(file_path=files[0], nodes=nodes)
         else:
-            cache[key] = DayCache(
-                file_path=None,
-                nodes=[],
-                original_content='',
-            )
+            cache[key] = DayCache(file_path=None, nodes=[])
     return cache[key]
 
 
 def cache_has_changes(cache: dict) -> bool:
-    return any(serialize(day.nodes) != day.original_content for day in cache.values())
+    return any(day.has_changes for day in cache.values())
 
 
 def save_cache(cache: dict, directory: str) -> None:
     for key, day in cache.items():
-        content = serialize(day.nodes)
-        if content == day.original_content:
+        if not day.has_changes:
             continue
+        content = serialize(day.nodes)
         if day.file_path is None:
             day.file_path = os.path.join(directory, f"{key}.md")
         if os.path.exists(day.file_path):
             BackupManager.backup(day.file_path, directory)
         FileWriter.write_atomic(day.file_path, content.splitlines(keepends=True))
-        day.original_content = content
+        day._saved_version = day._version
 
 
 def _find_path_for_task(nodes: list, task: Task) -> 'tuple[TaskBlock, list[tuple[list, int]]] | None':
@@ -196,10 +186,7 @@ def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int
     if not src_blocks or not (0 <= cursor_row < len(src_blocks)):
         return cursor_row
     block = src_blocks[cursor_row]
-    remove_block(src_cache.nodes, block)
-    append_block(dst_cache.nodes, block)
-    if block.task.time:
-        sort_timed_nodes(dst_cache.nodes)
+    src_cache.move_block_to(block, dst_cache)
     return len(dst_cache.task_list) - 1
 
 
@@ -232,8 +219,8 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
         ensure_day_loaded(state.cache, adj_day, state.directory)
         src_cache = state.day(cursor_col)
         adj_cache = state.cache[adj_day.isoformat()]
-        remove_block(src_cache.nodes, root_block)
-        append_block(adj_cache.nodes, root_block)
+        src_cache.remove_block(root_block)
+        adj_cache.add_block(root_block)
         adj_exp = week_expanded(adj_cache.task_list)
         new_row = next((i for i, (t, _d) in enumerate(adj_exp) if t is root_task_obj), len(adj_exp) - 1)
         return cursor_col, new_row, direction

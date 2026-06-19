@@ -35,13 +35,7 @@ class TestWeekCacheChanges(unittest.TestCase):
 
     def _make_cache(self, blocks):
         nodes = list(blocks)
-        return {
-            '2024-01-15': DayCache(
-                file_path=None,
-                nodes=nodes,
-                original_content=serialize(nodes),
-            )
-        }
+        return {'2024-01-15': DayCache(file_path=None, nodes=nodes)}
 
     def test_no_changes_returns_false(self):
         child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
@@ -55,8 +49,7 @@ class TestWeekCacheChanges(unittest.TestCase):
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
         parent_block = task_to_block(parent)
         cache = self._make_cache([parent_block])
-        parent.status = 'done'
-        cache['2024-01-15'].find_block(parent).refresh_header()
+        cache['2024-01-15'].set_status(parent, 'done')
         self.assertTrue(cache_has_changes(cache))
 
     def test_subtask_status_change_detected(self):
@@ -65,8 +58,7 @@ class TestWeekCacheChanges(unittest.TestCase):
         child_block = task_to_block(child)
         parent_block = task_to_block(parent, subtask_blocks=[child_block])
         cache = self._make_cache([parent_block])
-        child.status = 'done'
-        cache['2024-01-15'].find_block(child).refresh_header()
+        cache['2024-01-15'].set_status(child, 'done')
         self.assertTrue(cache_has_changes(cache))
 
 
@@ -114,21 +106,22 @@ class TestPlannerState(unittest.TestCase):
         key = self.date.isoformat()
         state.load_day(self.date)
         new = Task(title='Ephemeral', status='todo', time=None, line_number=-1, indent='')
-        state.days[key].nodes.append(task_to_block(new))
+        state.days[key].add_block(task_to_block(new))
         self.assertEqual(len(state.days[key].task_list), 3)
         state.reload_day_by_key(key)
         self.assertEqual(len(state.days[key].task_list), 2)
         self.assertNotIn('Ephemeral', [b.task.title for b in state.days[key].task_list])
 
-    def test_reload_refreshes_original_content(self):
+    def test_reload_refreshes_task_list(self):
         state = PlannerState(self.tmpdir)
         key = self.date.isoformat()
         state.load_day(self.date)
-        len_before = len(state.days[key].original_content)
+        n_before = len(state.days[key].task_list)
         with open(self.path, 'a', encoding='utf-8') as f:
             f.write("- [ ] Task C\n")
         state.reload_day_by_key(key)
-        self.assertGreater(len(state.days[key].original_content), len_before)
+        self.assertGreater(len(state.days[key].task_list), n_before)
+        self.assertFalse(state.days[key].has_changes)
 
     def test_task_body_dedented_on_load(self):
         # File has "    Some notes" (raw indented); block.nodes RawLines must dedent
@@ -662,6 +655,54 @@ class TestWeekGridInteraction(unittest.TestCase):
         thu_children = [n for n in thu[0].nodes if isinstance(n, TaskBlock)]
         self.assertEqual([b.task.title for b in thu_children], ['Todo sub'])
 
+    def test_shift_then_enter_quit_preserves_task_in_week_view(self):
+        """Regression: after shifting a task to a day with no existing file, entering
+        that day without saving, and quitting without saving, the task must remain
+        visible in the destination column — previously push_day() reloaded the newly
+        created empty file and discarded the in-memory shift."""
+
+        async def run():
+            fixed = datetime.date.fromisoformat('2024-01-10')
+            mock_dt = MagicMock()
+            mock_dt.date.today.return_value = fixed
+            mock_dt.timedelta = datetime.timedelta
+            mock_dt.date.fromisoformat = datetime.date.fromisoformat
+            with patch('tools.journal_tools.planner.week_screen.datetime', mock_dt):
+                app = PlannerApp(self.tmpdir)
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await pilot.press('L')      # shift "My task" Wed (col=2) → Thu (col=3)
+                    await pilot.pause()
+                    await pilot.press('k')      # move cursor to Thu header (row=-1)
+                    await pilot.pause()
+                    await pilot.press('enter')  # open Thu → save dialog fires (cache dirty)
+                    await pilot.pause()
+                    if isinstance(app.screen, SaveDialog):
+                        await pilot.click('#no')
+                        await pilot.pause()
+                    # DayScreen for Thu is now open with "My task" visible
+                    await pilot.press('q')      # quit → save dialog (Thu in-memory is dirty)
+                    await pilot.pause()
+                    if isinstance(app.screen, SaveDialog):
+                        await pilot.click('#no')
+                        await pilot.pause()
+                    # Back in WeekScreen
+                    grid = app.screen.query_one(WeekGrid)
+                    return grid._state
+
+        state = asyncio.run(run())
+        self.assertEqual(
+            len(state.day(3).task_list), 1,
+            "task must survive the round-trip through DayScreen",
+        )
+        self.assertEqual(state.day(3).task_list[0].task.title, 'My task')
+        self.assertEqual(len(state.day(2).task_list), 0, "task must be gone from source day")
+        # No save happened — source file unchanged, dest file empty (created but not written)
+        with open(os.path.join(self.tmpdir, '2024-01-10.md')) as f:
+            self.assertIn('My task', f.read(), "source file must be unchanged on disk")
+        with open(os.path.join(self.tmpdir, '2024-01-11.md')) as f:
+            self.assertEqual(f.read(), '', "dest file must be empty (no save happened)")
+
     def test_carry_preserves_subtask_body_in_memory(self):
         # Subtask with body text; body should be present on the carried child in memory.
         with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
@@ -1107,7 +1148,7 @@ class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
     def _delete_and_save(self, state, block, date=datetime.date(2024, 3, 15)):
         from tools.journal_tools.planner.weekly import save_cache
         day = state.days[date.isoformat()]
-        remove_block(day.nodes, block)
+        day.remove_block(block)
         save_cache(state.days, self.tmpdir)
 
     def test_delete_root_task_removes_owned_blank_line(self):
@@ -1174,10 +1215,7 @@ class TestWeekSaveCacheTimedShift(unittest.TestCase):
         cache_a = state.days[date_a.isoformat()]
         cache_b = state.days[date_b.isoformat()]
         block_a = cache_a.task_list[2]  # TaskBlock for 10:00 Task A
-        remove_block(cache_a.nodes, block_a)
-        append_block(cache_b.nodes, block_a)
-        if block_a.task.time:
-            sort_timed_nodes(cache_b.nodes)
+        cache_a.move_block_to(block_a, cache_b)  # remove, add with time-sort, bump both
         save_cache(state.days, self.tmpdir)
         return state, save_cache
 

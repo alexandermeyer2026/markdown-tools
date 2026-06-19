@@ -1,6 +1,7 @@
 import datetime
 import os
 
+from models import Task
 from os_utils import FileFinder
 from parser.file_model import TaskBlock, parse, serialize
 
@@ -17,10 +18,21 @@ def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
 
 
 class DayCache:
-    def __init__(self, file_path, nodes, original_content):
+    def __init__(self, file_path, nodes):
         self.file_path = file_path
         self.nodes = nodes
-        self.original_content = original_content
+        self._version = 0
+        self._saved_version = 0
+        self._cp_content = None
+        self._cp_saved_version = 0
+        self._cp_version = 0
+
+    @property
+    def has_changes(self) -> bool:
+        return self._version != self._saved_version
+
+    def _bump(self) -> None:
+        self._version += 1
 
     @property
     def task_list(self) -> list:
@@ -28,6 +40,137 @@ class DayCache:
 
     def find_block(self, task) -> 'TaskBlock | None':
         return _find_block_in(self.nodes, task)
+
+    # ── Checkpointing ─────────────────────────────────────────────────────────
+
+    def checkpoint(self) -> None:
+        """Snapshot current state; restore_checkpoint() returns here."""
+        self._cp_content = serialize(self.nodes)
+        self._cp_saved_version = self._saved_version
+        self._cp_version = self._version
+
+    def update_checkpoint(self) -> None:
+        """Advance checkpoint after a ctrl+s save so discard returns to saved state."""
+        self._cp_content = serialize(self.nodes)
+        self._cp_saved_version = self._saved_version
+        self._cp_version = self._version
+
+    def restore_checkpoint(self) -> None:
+        """Revert to the state when checkpoint() was last called."""
+        if self._cp_content is None:
+            self.discard()
+            return
+        from parser.file_model import parse_lines
+        self.nodes = parse_lines(self._cp_content.splitlines(keepends=True))
+        self._saved_version = self._cp_saved_version
+        self._version = self._cp_version
+
+    def discard(self) -> None:
+        """Reload from disk, discarding all in-memory changes."""
+        if self.file_path and os.path.exists(self.file_path):
+            self.nodes = parse(self.file_path)
+        else:
+            self.nodes = []
+        self._version = self._saved_version
+
+    # ── Mutation API ──────────────────────────────────────────────────────────
+
+    def set_status(self, task, status: str) -> None:
+        if task.status == status:
+            return
+        task.status = status
+        block = self.find_block(task)
+        if block:
+            block.refresh_header()
+        self._bump()
+
+    def set_time(self, task, time) -> None:
+        from .weekly import sort_timed_nodes
+        if task.time == time:
+            return
+        task.time = time
+        block = self.find_block(task)
+        if block:
+            block.refresh_header()
+        sort_timed_nodes(self.nodes)
+        self._bump()
+
+    def update_task(self, task, title: str, status: str, time, body, subtasks) -> None:
+        from .weekly import sort_timed_nodes, task_to_block
+        before = serialize(self.nodes)
+        task.title = title
+        task.status = status
+        task.time = time
+        block = self.find_block(task)
+        if block:
+            block.refresh_header()
+            rebuilt = task_to_block(task, body, subtasks)
+            block.nodes[:] = rebuilt.nodes
+        sort_timed_nodes(self.nodes)
+        if serialize(self.nodes) != before:
+            self._bump()
+
+    def add_block(self, block: TaskBlock) -> None:
+        from .weekly import append_block
+        append_block(self.nodes, block)
+        self._bump()
+
+    def remove_block(self, block: TaskBlock) -> None:
+        from .weekly import remove_block as _remove
+        _remove(self.nodes, block)
+        self._bump()
+
+    def move_block_to(self, block: TaskBlock, dst: 'DayCache') -> None:
+        from .weekly import append_block, remove_block as _remove, sort_timed_nodes
+        _remove(self.nodes, block)
+        self._bump()
+        append_block(dst.nodes, block)
+        if block.task.time:
+            sort_timed_nodes(dst.nodes)
+        dst._bump()
+
+    def carry_subtasks_to(self, task, dst: 'DayCache') -> bool:
+        """Move unfinished subtasks to a same-title block in dst. Returns True if any carried."""
+        block = self.find_block(task)
+        if block is None:
+            return False
+        child_blocks = [n for n in block.nodes if isinstance(n, TaskBlock)]
+        unfinished = [b for b in child_blocks if b.task.status not in ("done", "failed", "started")]
+        if not unfinished:
+            return False
+        unfinished_ids = {id(b) for b in unfinished}
+        block.nodes[:] = [
+            n for n in block.nodes
+            if not (isinstance(n, TaskBlock) and id(n) in unfinished_ids)
+        ]
+        self._bump()
+        new_task = Task(title=task.title, status="todo", time=None, line_number=-1, indent="")
+        new_block = TaskBlock(task=new_task, header=new_task.to_line() + '\n', nodes=list(unfinished))
+        from .weekly import append_block
+        append_block(dst.nodes, new_block)
+        dst._bump()
+        return True
+
+    def tab_task_block(self, task) -> bool:
+        from .weekly import tab_task
+        result = tab_task(self.nodes, task)
+        if result:
+            self._bump()
+        return result
+
+    def shift_tab_task_block(self, task) -> bool:
+        from .weekly import shift_tab_task
+        result = shift_tab_task(self.nodes, task)
+        if result:
+            self._bump()
+        return result
+
+    def reorder_block(self, task, direction: int) -> bool:
+        from .weekly import move_block_in_nodes
+        result = move_block_in_nodes(self.nodes, task, direction)
+        if result:
+            self._bump()
+        return result
 
 
 class PlannerState:
@@ -70,16 +213,9 @@ class PlannerState:
     def _load_into_state(self, key: str, file_path: str | None) -> None:
         if file_path and os.path.exists(file_path):
             nodes = parse(file_path)
-            with open(file_path, 'r', encoding='utf-8') as f:
-                original_content = f.read()
         else:
             nodes = []
-            original_content = ''
-        self._days[key] = DayCache(
-            file_path=file_path,
-            nodes=nodes,
-            original_content=original_content,
-        )
+        self._days[key] = DayCache(file_path=file_path, nodes=nodes)
 
 
 class WeekState:

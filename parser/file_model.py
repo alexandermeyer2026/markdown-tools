@@ -77,18 +77,14 @@ def _parse_task_from_line(line: str, line_number: int = -1) -> Task | None:
     return Task(title=title, status=status, time=task_time, line_number=line_number, indent=indent)
 
 
-def parse(file_path: str) -> list[Node]:
-    """Parse a file into an ordered node list. serialize(parse(f)) == open(f).read()."""
+def parse_lines(lines: list[str]) -> list[Node]:
+    """Parse a list of lines into an ordered node list."""
     top_level: list[Node] = []
     stack: list[tuple[int, TaskBlock]] = []  # (indent_len, block)
 
     def current_nodes() -> list[Node]:
         return stack[-1][1].nodes if stack else top_level
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-
-    n_lines = len(lines)
     for i, line in enumerate(lines):
         task = _parse_task_from_line(line, line_number=i + 1)
         if task is not None:
@@ -114,3 +110,10 @@ def parse(file_path: str) -> list[Node]:
             owner_nodes.append(RawLine(line))
 
     return top_level
+
+
+def parse(file_path: str) -> list[Node]:
+    """Parse a file into an ordered node list. serialize(parse(f)) == open(f).read()."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    return parse_lines(lines)

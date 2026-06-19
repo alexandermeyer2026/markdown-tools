@@ -5,14 +5,16 @@ from parser.file_model import serialize
 
 
 def has_changes(day) -> bool:
-    return serialize(day.nodes) != day.original_content
+    return day.has_changes
 
 
 def save(day, directory):
-    content = serialize(day.nodes)
-    if content == day.original_content:
+    if not day.has_changes:
         return
-    if day.file_path and os.path.exists(day.file_path):
+    if day.file_path is None:
+        raise ValueError("cannot save a day with no file path")
+    content = serialize(day.nodes)
+    if os.path.exists(day.file_path):
         BackupManager.backup(day.file_path, directory)
     FileWriter.write_atomic(day.file_path, content.splitlines(keepends=True))
-    day.original_content = content
+    day._saved_version = day._version
