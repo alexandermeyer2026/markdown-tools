@@ -3,7 +3,7 @@ import os
 
 from models import Task
 from os_utils import FileFinder
-from parser.file_model import TaskBlock, parse, serialize
+from parser.file_model import RawLine, TaskBlock, parse, serialize
 
 
 def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
@@ -104,8 +104,20 @@ class DayCache:
         block = self.find_block(task)
         if block:
             block.refresh_header()
+            # Trailing blank RawLines are inter-task gaps owned by this block;
+            # they are not body content and must survive an edit unchanged.
+            trailing = []
+            for node in reversed(block.nodes):
+                if isinstance(node, RawLine) and not node.raw.strip():
+                    trailing.insert(0, node)
+                else:
+                    break
             rebuilt = task_to_block(task, body, subtasks)
-            block.nodes[:] = rebuilt.nodes
+            # task_to_block may emit a trailing blank when body ends with \n;
+            # remove it so we restore exactly the original inter-task spacing.
+            while rebuilt.nodes and isinstance(rebuilt.nodes[-1], RawLine) and not rebuilt.nodes[-1].raw.strip():
+                rebuilt.nodes.pop()
+            block.nodes[:] = rebuilt.nodes + trailing
         sort_timed_nodes(self.nodes)
         if serialize(self.nodes) != before:
             self._bump()

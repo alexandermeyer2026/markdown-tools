@@ -1154,6 +1154,56 @@ class TestWeekGridBodySave(unittest.TestCase):
 
         self.assertFalse(asyncio.run(run()))
 
+    def test_trailing_blank_preserved_after_edit(self):
+        """Blank line separating tasks must survive an edit of the preceding task."""
+        import tempfile, shutil
+        tmpdir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmpdir, '2024-01-10.md')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write("- [ ] Task A\n\n- [ ] Task B\n")
+
+            from tools.journal_tools.planner.state import PlannerState
+            from tools.journal_tools.planner.weekly import save_cache
+            import datetime as dt
+            state = PlannerState(tmpdir)
+            state.load_day(dt.date(2024, 1, 10))
+            day = state.days['2024-01-10']
+            task_a = day.task_list[0].task
+            day.update_task(task_a, 'Task A', 'done', None, None, [])
+            save_cache(state.days, tmpdir)
+
+            with open(path, encoding='utf-8') as f:
+                content = f.read()
+            self.assertEqual(content, "- [x] Task A\n\n- [ ] Task B\n")
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_trailing_blank_preserved_after_edit_with_body(self):
+        """Blank line separating tasks must survive an edit that also changes body text."""
+        import tempfile, shutil
+        tmpdir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmpdir, '2024-01-10.md')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write("- [ ] Task A\n    Old notes\n\n- [ ] Task B\n")
+
+            from tools.journal_tools.planner.state import PlannerState
+            from tools.journal_tools.planner.weekly import save_cache
+            import datetime as dt
+            state = PlannerState(tmpdir)
+            state.load_day(dt.date(2024, 1, 10))
+            day = state.days['2024-01-10']
+            task_a = day.task_list[0].task
+            day.update_task(task_a, 'Task A', 'todo', None, 'New notes', [])
+            save_cache(state.days, tmpdir)
+
+            with open(path, encoding='utf-8') as f:
+                content = f.read()
+            self.assertEqual(content, "- [ ] Task A\n    New notes\n\n- [ ] Task B\n")
+        finally:
+            shutil.rmtree(tmpdir)
+
 
 class TestWeekSaveCacheDeleteBlanks(unittest.TestCase):
     """Unit tests for blank line preservation when deleting tasks via save_cache."""

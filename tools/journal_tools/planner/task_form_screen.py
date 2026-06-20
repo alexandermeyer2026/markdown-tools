@@ -245,6 +245,8 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
         child_blocks: list = []
         if block:
             body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
+            while body_lines and not body_lines[-1].strip():
+                body_lines.pop()
             body_str = textwrap.dedent('\n'.join(body_lines)).lstrip('\n')
             child_blocks = [n for n in block.nodes if isinstance(n, TaskBlock)]
         with VerticalGroup():
