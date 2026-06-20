@@ -4,7 +4,7 @@ import unittest
 
 import pytest
 
-from parser.file_model import RawLine, TaskBlock, parse, serialize
+from parser.file_model import RawLine, TaskBlock, parse, parse_lines, serialize
 
 
 def write_temp(content: str) -> str:
@@ -215,6 +215,131 @@ class TestRefreshHeader(unittest.TestCase):
         nodes = parse_str(original)
         # no refresh_header called — header must still be the original line
         self.assertEqual(nodes[0].header, original)
+
+
+# ── Priority ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.integration
+class TestPriority(unittest.TestCase):
+
+    def test_high_priority_parsed(self):
+        nodes = parse_str('- [ ] !!! Buy groceries\n')
+        self.assertEqual(nodes[0].task.priority, '!!!')
+        self.assertEqual(nodes[0].task.title, 'Buy groceries')
+
+    def test_medium_priority_parsed(self):
+        nodes = parse_str('- [ ] !! Task\n')
+        self.assertEqual(nodes[0].task.priority, '!!')
+
+    def test_low_priority_parsed(self):
+        nodes = parse_str('- [ ] ! Task\n')
+        self.assertEqual(nodes[0].task.priority, '!')
+
+    def test_priority_with_time(self):
+        nodes = parse_str('- [ ] 10:00 !! Pick up Mike\n')
+        t = nodes[0].task
+        self.assertEqual(t.priority, '!!')
+        self.assertEqual(t.title, 'Pick up Mike')
+        self.assertEqual(t.time.start, '10:00')
+
+    def test_priority_with_time_range(self):
+        nodes = parse_str('- [ ] 13:00-14:00 !!! Meeting\n')
+        t = nodes[0].task
+        self.assertEqual(t.priority, '!!!')
+        self.assertEqual(t.title, 'Meeting')
+
+    def test_no_priority_is_none(self):
+        nodes = parse_str('- [ ] Buy milk\n')
+        self.assertIsNone(nodes[0].task.priority)
+
+    def test_priority_roundtrip(self):
+        for line in [
+            '- [ ] !!! Buy groceries\n',
+            '- [ ] 10:00 !! Pick up Mike\n',
+            '- [ ] 13:00-14:00 !!! Meeting\n',
+            '- [ ] Buy milk\n',
+        ]:
+            self.assertEqual(roundtrip(line), line)
+
+    def test_refresh_header_preserves_priority(self):
+        nodes = parse_str('- [ ] !!! Buy groceries\n')
+        nodes[0].task.status = 'done'
+        nodes[0].refresh_header()
+        self.assertEqual(nodes[0].header, '- [x] !!! Buy groceries\n')
+
+
+# ── Tags ─────────────────────────────────────────────────────────────────────
+
+@pytest.mark.integration
+class TestTags(unittest.TestCase):
+
+    def test_tag_line_populates_tags(self):
+        nodes = parse_str('- [ ] Task\n  #household\n')
+        self.assertEqual(nodes[0].task.tags, ['household'])
+
+    def test_multiple_tags(self):
+        nodes = parse_str('- [ ] Task\n  #Job-Search #freetime\n')
+        self.assertEqual(nodes[0].task.tags, ['Job-Search', 'freetime'])
+
+    def test_tag_node_reference_set(self):
+        nodes = parse_str('- [ ] Task\n  #household\n')
+        block = nodes[0]
+        self.assertIsNotNone(block.tag_node)
+        self.assertIs(block.tag_node, block.nodes[0])
+
+    def test_no_tag_line_empty_tags(self):
+        nodes = parse_str('- [ ] Task\n  Some notes\n')
+        self.assertEqual(nodes[0].task.tags, [])
+        self.assertIsNone(nodes[0].tag_node)
+
+    def test_tag_line_roundtrip(self):
+        c = '- [ ] Task\n  #household #freetime\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_tag_line_with_body_notes_roundtrip(self):
+        c = '- [ ] Task\n  Some notes\n  #household\n'
+        self.assertEqual(roundtrip(c), c)
+
+    def test_prose_with_hash_not_treated_as_tag_line(self):
+        nodes = parse_str('- [ ] Task\n  blocked by #3\n')
+        self.assertEqual(nodes[0].task.tags, [])
+
+    def test_refresh_tags_updates_existing_tag_line(self):
+        nodes = parse_str('- [ ] Task\n  #household\n')
+        block = nodes[0]
+        block.task.tags = ['household', 'freetime']
+        block.refresh_tags()
+        self.assertEqual(serialize(nodes), '- [ ] Task\n  #household #freetime\n')
+
+    def test_refresh_tags_inserts_new_tag_line(self):
+        nodes = parse_str('- [ ] Task\n  Some notes\n')
+        block = nodes[0]
+        block.task.tags = ['household']
+        block.refresh_tags()
+        self.assertEqual(serialize(nodes), '- [ ] Task\n  Some notes\n  #household\n')
+
+    def test_refresh_tags_removes_tag_line_when_empty(self):
+        nodes = parse_str('- [ ] Task\n  #household\n')
+        block = nodes[0]
+        block.task.tags = []
+        block.refresh_tags()
+        self.assertEqual(serialize(nodes), '- [ ] Task\n')
+
+    def test_priority_and_tags_combined(self):
+        c = '- [ ] !!! Buy groceries\n  #household\n'
+        nodes = parse_str(c)
+        t = nodes[0].task
+        self.assertEqual(t.priority, '!!!')
+        self.assertEqual(t.title, 'Buy groceries')
+        self.assertEqual(t.tags, ['household'])
+        self.assertEqual(roundtrip(c), c)
+
+    def test_subtask_tags_independent(self):
+        nodes = parse_str('- [ ] Parent\n  - [ ] Child\n    #household\n')
+        parent = nodes[0]
+        child = parent.nodes[0]
+        self.assertEqual(parent.task.tags, [])
+        self.assertEqual(child.task.tags, ['household'])
 
 
 if __name__ == '__main__':

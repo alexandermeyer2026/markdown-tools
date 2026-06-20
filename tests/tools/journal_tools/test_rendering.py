@@ -4,7 +4,7 @@ from models import Task, TaskTime
 from parser.file_model import RawLine, TaskBlock
 from tools.journal_tools.rendering import (
     GRAY, RESET, STATUS_COLORS, STATUS_ICONS,
-    ansi_truncate_pad, get_time_slot, scale_lines, subtask_rows,
+    ansi_truncate_pad, body_rows, get_time_slot, scale_lines, subtask_rows,
 )
 
 
@@ -93,6 +93,44 @@ class TestScaleLines(unittest.TestCase):
 def _make_block(task: Task, children: list | None = None) -> TaskBlock:
     nodes = [n for n in (children or [])]
     return TaskBlock(task=task, header=task.to_line() + '\n', nodes=nodes)
+
+
+class TestBodyRows(unittest.TestCase):
+    def _task(self) -> Task:
+        return Task(title='Task', status='todo', time=None, line_number=1, indent='')
+
+    def test_no_body_returns_empty(self):
+        block = _make_block(self._task())
+        self.assertEqual(body_rows(block), [])
+
+    def test_body_text_rendered(self):
+        note = RawLine('  Some note\n')
+        block = TaskBlock(task=self._task(), header='- [ ] Task\n', nodes=[note])
+        rows = body_rows(block)
+        self.assertEqual(len(rows), 1)
+        self.assertIn('Some note', rows[0])
+
+    def test_tag_line_excluded_from_body(self):
+        note = RawLine('  Some note\n')
+        tag = RawLine('  #household\n')
+        task = self._task()
+        task.tags = ['household']
+        block = TaskBlock(task=task, header='- [ ] Task\n', nodes=[note, tag], tag_node=tag)
+        rows = body_rows(block)
+        self.assertEqual(len(rows), 1)
+        self.assertIn('Some note', rows[0])
+        self.assertNotIn('#household', rows[0])
+
+    def test_only_tag_line_returns_empty(self):
+        tag = RawLine('  #household\n')
+        task = self._task()
+        task.tags = ['household']
+        block = TaskBlock(task=task, header='- [ ] Task\n', nodes=[tag], tag_node=tag)
+        self.assertEqual(body_rows(block), [])
+
+    def test_blank_only_body_returns_empty(self):
+        block = TaskBlock(task=self._task(), header='- [ ] Task\n', nodes=[RawLine('\n')])
+        self.assertEqual(body_rows(block), [])
 
 
 class TestSubtaskRows(unittest.TestCase):

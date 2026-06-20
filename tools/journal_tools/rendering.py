@@ -105,7 +105,7 @@ def insert_now_marker(line: str, col: int) -> str:
 
 
 def body_rows(block: TaskBlock, left_pad: int = 0, depth: int = 0) -> list[str]:
-    body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
+    body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine) and n is not block.tag_node]
     if not body_lines:
         return []
     body_text = textwrap.dedent('\n'.join(body_lines)).strip()

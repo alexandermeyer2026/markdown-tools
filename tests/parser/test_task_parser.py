@@ -139,6 +139,29 @@ class TestFields(unittest.TestCase):
         self.assertEqual(task.time.start, '9:00')
         self.assertEqual(task.title, 'Meeting')
 
+    def test_priority_high(self):
+        task = self._parse_first('- [ ] !!! Buy groceries\n')
+        self.assertEqual(task.priority, '!!!')
+        self.assertEqual(task.title, 'Buy groceries')
+
+    def test_priority_with_time(self):
+        task = self._parse_first('- [ ] 10:00 !! Pick up Mike\n')
+        self.assertEqual(task.priority, '!!')
+        self.assertEqual(task.title, 'Pick up Mike')
+        self.assertEqual(task.time.start, '10:00')
+
+    def test_no_priority_is_none(self):
+        task = self._parse_first('- [ ] Buy milk\n')
+        self.assertIsNone(task.priority)
+
+    def test_tags_parsed(self):
+        tasks = _parse_file('- [ ] Task\n  #household #freetime\n')
+        self.assertEqual(tasks[0].tags, ['household', 'freetime'])
+
+    def test_no_tags_empty(self):
+        task = self._parse_first('- [ ] Task\n')
+        self.assertEqual(task.tags, [])
+
 
 @pytest.mark.integration
 class TestNodeTree(unittest.TestCase):
