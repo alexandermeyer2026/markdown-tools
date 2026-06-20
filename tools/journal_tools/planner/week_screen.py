@@ -336,12 +336,19 @@ class WeekGrid(Widget, can_focus=True):
         task = self._selected_task()
         if task is None:
             return
-        day_cache = self._planner.days[self._selected_day().isoformat()]
-        block = day_cache.find_block(task)
-        if block:
-            day_cache.remove_block(block)
-        self._clamp_row()
-        self.refresh()
+
+        def on_confirm(confirmed: bool) -> None:
+            if not confirmed:
+                return
+            day_cache = self._planner.days[self._selected_day().isoformat()]
+            block = day_cache.find_block(task)
+            if block:
+                day_cache.remove_block(block)
+            self._clamp_row()
+            self.refresh()
+
+        from .save_dialog import SaveDialog
+        self.app.push_screen(SaveDialog("Delete task?"), on_confirm)
 
     # ── Screen-push actions ───────────────────────────────────────────────────
 

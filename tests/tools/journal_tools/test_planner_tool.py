@@ -196,6 +196,10 @@ class PlannerIntegrationTest(unittest.TestCase):
                 await pilot.pause()
                 for key in keys:
                     await pilot.press(key)
+                    await pilot.pause()
+                    if isinstance(app.screen, SaveDialog):
+                        await pilot.click('#yes')
+                        await pilot.pause()
                 if isinstance(app.screen, SaveDialog):
                     await pilot.click('#yes' if do_save else '#no')
 
@@ -280,20 +284,28 @@ class TestDayGridInteraction(unittest.TestCase):
         with open(self.path, encoding='utf-8') as f:
             return f.read()
 
-    async def _inspect(self, keys):
+    async def _inspect(self, keys, confirm_dialogs=True):
         """Press keys and return (timed_tasks, untimed_tasks) from the grid."""
         app = PlannerApp(self.directory, file_path=self.path)
         async with app.run_test() as pilot:
             for key in keys:
                 await pilot.press(key)
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog):
+                    await pilot.click('#yes' if confirm_dialogs else '#no')
+                    await pilot.pause()
             grid = app.screen.query_one(DayGrid)
             return list(grid._timed_tasks), list(grid._untimed_tasks)
 
     async def _drive_quit(self, keys, dialog_response=None):
         app = PlannerApp(self.directory, file_path=self.path)
         async with app.run_test() as pilot:
-            for key in keys:
+            for i, key in enumerate(keys):
                 await pilot.press(key)
+                await pilot.pause()
+                if isinstance(app.screen, SaveDialog) and i < len(keys) - 1:
+                    await pilot.click('#yes')  # confirm intermediate dialogs (e.g. delete)
+                    await pilot.pause()
             if dialog_response and isinstance(app.screen, SaveDialog):
                 await pilot.click(dialog_response)
 
@@ -392,6 +404,12 @@ class TestDayGridInteraction(unittest.TestCase):
         timed, untimed = asyncio.run(self._inspect(['j', 'D']))
         self.assertEqual([b.task.title for b in timed], ['Meeting'])
         self.assertEqual([b.task.title for b in untimed], [])
+
+    def test_delete_task_cancel_aborts_deletion(self):
+        # j → Buy milk (untimed), D opens confirm dialog, #no cancels — task stays
+        timed, untimed = asyncio.run(self._inspect(['j', 'D'], confirm_dialogs=False))
+        self.assertEqual([b.task.title for b in timed], ['Meeting'])
+        self.assertEqual([b.task.title for b in untimed], ['Buy milk'])
 
     def test_delete_does_not_persist_without_save(self):
         with open(self.path) as f:
@@ -591,7 +609,7 @@ class TestWeekGridInteraction(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
 
-    async def _inspect(self, keys, week_today='2024-01-10'):
+    async def _inspect(self, keys, week_today='2024-01-10', confirm_dialogs=True):
         fixed = datetime.date.fromisoformat(week_today)
         mock_dt = MagicMock()
         mock_dt.date.today.return_value = fixed
@@ -603,6 +621,10 @@ class TestWeekGridInteraction(unittest.TestCase):
                 await pilot.pause()  # let push_screen from on_mount settle
                 for key in keys:
                     await pilot.press(key)
+                    await pilot.pause()
+                    if isinstance(app.screen, SaveDialog):
+                        await pilot.click('#yes' if confirm_dialogs else '#no')
+                        await pilot.pause()
                 grid = app.screen.query_one(WeekGrid)
                 return grid._state, grid.cursor_col, grid.cursor_row
 
@@ -633,6 +655,12 @@ class TestWeekGridInteraction(unittest.TestCase):
         self.assertEqual(len(state.day(2).task_list), 1)
         self.assertEqual(state.day(2).task_list[0].task.title, 'My task')
         self.assertEqual([n for n in state.day(2).task_list[0].nodes if isinstance(n, TaskBlock)], [])
+
+    def test_D_cancel_leaves_task(self):
+        # D opens confirm dialog, #no cancels — task stays
+        state, col, row = asyncio.run(self._inspect(['D'], confirm_dialogs=False))
+        self.assertEqual(len(state.day(2).task_list), 1)
+        self.assertEqual(state.day(2).task_list[0].task.title, 'My task')
 
     def test_D_then_status_change_on_remaining(self):
         # j → Sub, D deletes Sub, cursor clamps to row=0 (My task), i → in progress

@@ -465,13 +465,20 @@ class DayGrid(Widget, can_focus=True):
         task = self._selected()
         if task is None:
             return
-        day = self._day()
-        block = day.find_block(task)
-        if block:
-            day.remove_block(block)
-        nav = self._navigable()
-        self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
-        self.refresh()
+
+        def on_confirm(confirmed: bool) -> None:
+            if not confirmed:
+                return
+            day = self._day()
+            block = day.find_block(task)
+            if block:
+                day.remove_block(block)
+            nav = self._navigable()
+            self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
+            self.refresh()
+
+        from .save_dialog import SaveDialog
+        self.app.push_screen(SaveDialog("Delete task?"), on_confirm)
 
     # ── Save / quit ───────────────────────────────────────────────────────────
 
