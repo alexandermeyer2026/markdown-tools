@@ -35,11 +35,17 @@ class WeekGrid(Widget, can_focus=True):
 
     BINDINGS = [
         Binding("j",     "cursor_down",       show=False),
+        Binding("down",  "cursor_down",       show=False),
         Binding("k",     "cursor_up",         show=False),
+        Binding("up",    "cursor_up",         show=False),
         Binding("h",     "cursor_left",       show=False),
+        Binding("left",  "cursor_left",       show=False),
         Binding("l",     "cursor_right",      show=False),
-        Binding("H",     "move_left",         show=False),
-        Binding("L",     "move_right",        show=False),
+        Binding("right", "cursor_right",      show=False),
+        Binding("H",          "move_left",    show=False),
+        Binding("shift+left", "move_left",    show=False),
+        Binding("L",          "move_right",   show=False),
+        Binding("shift+right","move_right",   show=False),
         Binding(">",     "carry_subtasks",    show=False),
         Binding("t",      "status_todo",        show=False),
         Binding("i",      "status_in_progress", show=False),
@@ -48,16 +54,17 @@ class WeekGrid(Widget, can_focus=True):
         Binding("f",      "status_failed",      show=False),
         Binding("tab",       "tab_task",       show=False),
         Binding("shift+tab", "shift_tab_task", show=False),
-        Binding("J",         "move_down",      show=False),
-        Binding("K",         "move_up",        show=False),
+        Binding("J",         "move_down",       show=False),
+        Binding("shift+down","move_down",       show=False),
+        Binding("K",         "move_up",         show=False),
+        Binding("shift+up",  "move_up",         show=False),
         Binding("enter",  "open_or_edit",       show=False),
         Binding("n",      "new_task",           show=False),
-        Binding("D",      "delete_task",        show=False),
+        Binding("backspace", "delete_task",     show=False),
         Binding("ctrl+s", "save",               show=False),
-        Binding("q",     "quit",              show=False),
         Binding("ctrl+c","quit",              show=False),
         Binding("space",  "toggle_select",    show=False),
-        Binding("escape", "clear_select",     show=False),
+        Binding("escape", "escape",           show=False),
     ]
 
     cursor_col: reactive[int] = reactive(0, repaint=True)
@@ -147,8 +154,8 @@ class WeekGrid(Widget, can_focus=True):
 
         lines.append(Text(""))
         hints = (
-            "[h/j/k/l] navigate  [space] select  [esc] clear  [H/L] move  [>] carry  "
-            "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [q] quit"
+            "[h/j/k/l] navigate  [space] select  [H/L] move  [>] carry  "
+            "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [Esc] quit"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -230,6 +237,12 @@ class WeekGrid(Widget, can_focus=True):
         if self._multiselect:
             self._multiselect = []
             self.refresh()
+
+    def action_escape(self) -> None:
+        if self._multiselect:
+            self.action_clear_select()
+        else:
+            self.action_quit()
 
     def _move_task_to_adj_day(self, day_key: str, task: Task, direction: int) -> str:
         if task.indent:

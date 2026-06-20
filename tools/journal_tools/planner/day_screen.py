@@ -35,11 +35,17 @@ class DayGrid(Widget, can_focus=True):
 
     BINDINGS = [
         Binding("j",     "cursor_down",   show=False),
+        Binding("down",  "cursor_down",   show=False),
         Binding("k",     "cursor_up",     show=False),
+        Binding("up",    "cursor_up",     show=False),
         Binding("h",     "shift_left",    show=False),
+        Binding("left",  "shift_left",    show=False),
         Binding("l",     "shift_right",   show=False),
-        Binding("H",     "shrink_end",    show=False),
-        Binding("L",     "extend_end",    show=False),
+        Binding("right", "shift_right",   show=False),
+        Binding("H",          "shrink_end",   show=False),
+        Binding("shift+left", "shrink_end",   show=False),
+        Binding("L",          "extend_end",   show=False),
+        Binding("shift+right","extend_end",   show=False),
         Binding("r",     "remove_time",   show=False),
         Binding("t",      "status_todo",        show=False),
         Binding("i",      "status_in_progress", show=False),
@@ -48,16 +54,17 @@ class DayGrid(Widget, can_focus=True):
         Binding("f",      "status_failed",      show=False),
         Binding("tab",        "tab_task",       show=False),
         Binding("shift+tab",  "shift_tab_task", show=False),
-        Binding("J",          "move_down",      show=False),
-        Binding("K",          "move_up",        show=False),
+        Binding("J",         "move_down",       show=False),
+        Binding("shift+down","move_down",       show=False),
+        Binding("K",         "move_up",         show=False),
+        Binding("shift+up",  "move_up",         show=False),
         Binding("enter",  "edit_task",          show=False),
         Binding("n",      "new_task",           show=False),
-        Binding("D",      "delete_task",        show=False),
+        Binding("backspace", "delete_task",     show=False),
         Binding("ctrl+s", "save",               show=False),
-        Binding("q",     "quit",          show=False),
         Binding("ctrl+c","quit",          show=False),
         Binding("space",  "toggle_select", show=False),
-        Binding("escape", "clear_select",  show=False),
+        Binding("escape", "escape",        show=False),
     ]
 
     cursor_idx: reactive[int] = reactive(0, repaint=True)
@@ -170,8 +177,8 @@ class DayGrid(Widget, can_focus=True):
 
         lines.append(Text(""))
         hints = (
-            "[j/k] move  [space] select  [esc] clear  [h/l] shift  [H/L] end time  [r] remove time  "
-            "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [q] back"
+            "[j/k] move  [space] select  [h/l] shift  [H/L] end time  [r] remove time  "
+            "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [Esc] back"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -316,6 +323,12 @@ class DayGrid(Widget, can_focus=True):
         if self._multiselect:
             self._multiselect = []
             self.refresh()
+
+    def action_escape(self) -> None:
+        if self._multiselect:
+            self.action_clear_select()
+        else:
+            self.action_quit()
 
     def _do_save(self) -> None:
         save(self._day(), self._directory)

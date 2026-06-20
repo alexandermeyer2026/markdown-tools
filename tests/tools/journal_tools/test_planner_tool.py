@@ -385,14 +385,14 @@ class TestDayGridInteraction(unittest.TestCase):
     def test_quit_no_changes_does_not_save(self):
         with open(self.path) as f:
             content_before = f.read()
-        asyncio.run(self._drive_quit(['q']))
+        asyncio.run(self._drive_quit(['escape']))
         with open(self.path) as f:
             self.assertEqual(f.read(), content_before)
 
     def test_quit_discard_does_not_save(self):
         with open(self.path) as f:
             content_before = f.read()
-        asyncio.run(self._drive_quit(['l', 'q'], dialog_response='#no'))
+        asyncio.run(self._drive_quit(['l', 'escape'], dialog_response='#no'))
         with open(self.path) as f:
             self.assertEqual(f.read(), content_before)
 
@@ -401,20 +401,20 @@ class TestDayGridInteraction(unittest.TestCase):
     def test_delete_untimed_task(self):
         # j moves cursor to Buy milk (untimed), D deletes it
         # (integration tests only cover timed deletion, so this fills the gap)
-        timed, untimed = asyncio.run(self._inspect(['j', 'D']))
+        timed, untimed = asyncio.run(self._inspect(['j', 'backspace']))
         self.assertEqual([b.task.title for b in timed], ['Meeting'])
         self.assertEqual([b.task.title for b in untimed], [])
 
     def test_delete_task_cancel_aborts_deletion(self):
         # j → Buy milk (untimed), D opens confirm dialog, #no cancels — task stays
-        timed, untimed = asyncio.run(self._inspect(['j', 'D'], confirm_dialogs=False))
+        timed, untimed = asyncio.run(self._inspect(['j', 'backspace'], confirm_dialogs=False))
         self.assertEqual([b.task.title for b in timed], ['Meeting'])
         self.assertEqual([b.task.title for b in untimed], ['Buy milk'])
 
     def test_delete_does_not_persist_without_save(self):
         with open(self.path) as f:
             content_before = f.read()
-        asyncio.run(self._drive_quit(['D', 'q'], dialog_response='#no'))
+        asyncio.run(self._drive_quit(['backspace', 'escape'], dialog_response='#no'))
         with open(self.path) as f:
             self.assertEqual(f.read(), content_before)
 
@@ -642,14 +642,14 @@ class TestWeekGridInteraction(unittest.TestCase):
     # ── Deletion ──────────────────────────────────────────────────────────────
 
     def test_D_deletes_root_task(self):
-        # cursor starts at col=2 (Wednesday), row=0 (My task); D removes it
-        state, col, row = asyncio.run(self._inspect(['D']))
+        # cursor starts at col=2 (Wednesday), row=0 (My task); backspace removes it
+        state, col, row = asyncio.run(self._inspect(['backspace']))
         self.assertEqual(len(state.day(2).task_list), 0)
         self.assertEqual(row, -1)  # clamped to -1 when day is empty
 
     def test_D_on_subtask_removes_only_subtask(self):
-        # j → row=1 (Sub), D removes Sub but leaves My task
-        state, col, row = asyncio.run(self._inspect(['j', 'D']))
+        # j → row=1 (Sub), backspace removes Sub but leaves My task
+        state, col, row = asyncio.run(self._inspect(['j', 'backspace']))
         self.assertEqual(col, 2)
         self.assertEqual(row, 0)
         self.assertEqual(len(state.day(2).task_list), 1)
@@ -657,14 +657,14 @@ class TestWeekGridInteraction(unittest.TestCase):
         self.assertEqual([n for n in state.day(2).task_list[0].nodes if isinstance(n, TaskBlock)], [])
 
     def test_D_cancel_leaves_task(self):
-        # D opens confirm dialog, #no cancels — task stays
-        state, col, row = asyncio.run(self._inspect(['D'], confirm_dialogs=False))
+        # backspace opens confirm dialog, #no cancels — task stays
+        state, col, row = asyncio.run(self._inspect(['backspace'], confirm_dialogs=False))
         self.assertEqual(len(state.day(2).task_list), 1)
         self.assertEqual(state.day(2).task_list[0].task.title, 'My task')
 
     def test_D_then_status_change_on_remaining(self):
-        # j → Sub, D deletes Sub, cursor clamps to row=0 (My task), i → in progress
-        state, col, row = asyncio.run(self._inspect(['j', 'D', 'i']))
+        # j → Sub, backspace deletes Sub, cursor clamps to row=0 (My task), i → in progress
+        state, col, row = asyncio.run(self._inspect(['j', 'backspace', 'i']))
         self.assertEqual(state.day(2).task_list[0].task.status, 'in progress')
         self.assertEqual([n for n in state.day(2).task_list[0].nodes if isinstance(n, TaskBlock)], [])
 
@@ -709,7 +709,7 @@ class TestWeekGridInteraction(unittest.TestCase):
                         await pilot.click('#no')
                         await pilot.pause()
                     # DayScreen for Thu is now open with "My task" visible
-                    await pilot.press('q')      # quit → save dialog (Thu in-memory is dirty)
+                    await pilot.press('escape')      # quit → save dialog (Thu in-memory is dirty)
                     await pilot.pause()
                     if isinstance(app.screen, SaveDialog):
                         await pilot.click('#no')
@@ -1034,7 +1034,7 @@ class TestTaskFormScreen(unittest.TestCase):
         async def interact(pilot):
             pilot.app.screen.query_one(SubtaskList).focus()
             await pilot.pause()
-            await pilot.press('D')
+            await pilot.press('backspace')
             await pilot.pause()
             await pilot.click('#yes')
             await pilot.pause()
@@ -1531,8 +1531,8 @@ class TestDayGridMultiselect(unittest.TestCase):
         self.assertEqual(statuses['Task B'], 'todo')
 
     def test_delete_removes_selection_and_cursor_clears_multiselect(self):
-        # select A, j to B, D → A and B deleted; C survives; multiselect cleared
-        day, sel, _ = asyncio.run(self._inspect(['space', 'j', 'D']))
+        # select A, j to B, backspace → A and B deleted; C survives; multiselect cleared
+        day, sel, _ = asyncio.run(self._inspect(['space', 'j', 'backspace']))
         titles = [b.task.title for b in day.task_list]
         self.assertNotIn('Task A', titles)
         self.assertNotIn('Task B', titles)
@@ -1628,8 +1628,8 @@ class TestWeekGridMultiselect(unittest.TestCase):
         self.assertEqual(thu_titles, {'Task A', 'Task B'})
 
     def test_delete_removes_selection_and_cursor(self):
-        # select A (row 0), j to B (row 1), D → both deleted
-        state, _, row, sel = asyncio.run(self._inspect(['space', 'j', 'D']))
+        # select A (row 0), j to B (row 1), backspace → both deleted
+        state, _, row, sel = asyncio.run(self._inspect(['space', 'j', 'backspace']))
         self.assertEqual(len(state.day(2).task_list), 0)
         self.assertEqual(sel, [])
         self.assertEqual(row, -1)  # clamped to header when day is empty

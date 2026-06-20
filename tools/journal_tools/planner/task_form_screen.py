@@ -53,7 +53,7 @@ class SubtaskList(Widget, can_focus=True):
         Binding("k",     "cursor_up",      show=False),
         Binding("n",     "add_subtask",    show=False),
         Binding("enter", "edit_subtask",   show=False),
-        Binding("D",     "delete_subtask", show=False),
+        Binding("backspace", "delete_subtask", show=False),
     ]
 
     cursor_idx: reactive[int] = reactive(0, repaint=True)

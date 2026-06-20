@@ -159,11 +159,14 @@ class VersionList(Widget, can_focus=True):
     """
 
     BINDINGS = [
-        Binding("j", "cursor_down", show=False),
-        Binding("k", "cursor_up",   show=False),
-        Binding("l", "focus_right", show=False),
-        Binding("d", "toggle_diff", show=False),
-        Binding("r", "restore",     show=False),
+        Binding("j",     "cursor_down", show=False),
+        Binding("down",  "cursor_down", show=False),
+        Binding("k",     "cursor_up",   show=False),
+        Binding("up",    "cursor_up",   show=False),
+        Binding("l",     "focus_right", show=False),
+        Binding("right", "focus_right", show=False),
+        Binding("d",     "toggle_diff", show=False),
+        Binding("r",     "restore",     show=False),
     ]
 
     selected: reactive[int] = reactive(0, repaint=True)
@@ -222,11 +225,14 @@ class ContentView(Widget, can_focus=True):
     """
 
     BINDINGS = [
-        Binding("j", "scroll_down", show=False),
-        Binding("k", "scroll_up",   show=False),
-        Binding("h", "focus_left",  show=False),
-        Binding("d", "toggle_diff", show=False),
-        Binding("r", "restore",     show=False),
+        Binding("j",    "scroll_down", show=False),
+        Binding("down", "scroll_down", show=False),
+        Binding("k",    "scroll_up",   show=False),
+        Binding("up",   "scroll_up",   show=False),
+        Binding("h",    "focus_left",  show=False),
+        Binding("left", "focus_left",  show=False),
+        Binding("d",    "toggle_diff", show=False),
+        Binding("r",    "restore",     show=False),
     ]
 
     scroll_offset: reactive[int] = reactive(0, repaint=True)
@@ -305,7 +311,7 @@ class TimeMachineApp(App):
     """
 
     BINDINGS = [
-        Binding("q",      "quit", show=False),
+        Binding("escape", "quit", show=False),
         Binding("ctrl+c", "quit", show=False),
     ]
 
@@ -374,11 +380,11 @@ class TimeMachineApp(App):
         d_hint = "[d] toggle diff"
         idx = self.query_one(VersionList).selected
         if isinstance(focused, ContentView):
-            hints = f"[h] back to versions · [j/k] scroll · {d_hint} · [r] restore · [q] quit"
+            hints = f"[h] back to versions · [j/k] scroll · {d_hint} · [r] restore · [Esc] quit"
         elif idx == 0:
-            hints = f"[j/k] select version · [l] view content · {d_hint} · [q] quit"
+            hints = f"[j/k] select version · [l] view content · {d_hint} · [Esc] quit"
         else:
-            hints = f"[j/k] select version · [l] view content · {d_hint} · [r] restore · [q] quit"
+            hints = f"[j/k] select version · [l] view content · {d_hint} · [r] restore · [Esc] quit"
         self.query_one("#hints", Static).update(Text(f"  {hints}"))
 
     def toggle_diff(self) -> None:

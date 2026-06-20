@@ -107,7 +107,7 @@ class DashboardScreen(Screen):
     """
 
     BINDINGS = [
-        Binding("q",      "quit", show=False),
+        Binding("escape", "quit", show=False),
         Binding("ctrl+c", "quit", show=False),
     ]
 

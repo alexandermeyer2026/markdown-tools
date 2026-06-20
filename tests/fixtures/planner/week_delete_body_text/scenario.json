@@ -1,6 +1,6 @@
 {
   "args": [],
   "week_today": "2024-01-03",
-  "keys": ["D", "q"],
+  "keys": ["backspace", "escape"],
   "save": true
 }

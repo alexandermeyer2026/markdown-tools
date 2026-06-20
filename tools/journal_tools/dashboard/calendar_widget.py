@@ -25,9 +25,13 @@ class CalendarWidget(Widget, can_focus=True):
 
     BINDINGS = [
         Binding("j",     "next_week",  show=False),
+        Binding("down",  "next_week",  show=False),
         Binding("k",     "prev_week",  show=False),
+        Binding("up",    "prev_week",  show=False),
         Binding("h",     "prev_month", show=False),
+        Binding("left",  "prev_month", show=False),
         Binding("l",     "next_month", show=False),
+        Binding("right", "next_month", show=False),
         Binding("enter", "open_week",  show=False),
     ]
 
@@ -44,7 +48,7 @@ class CalendarWidget(Widget, can_focus=True):
         self.selected_week = next((i for i, w in enumerate(weeks) if today.day in w), 0)
 
     def on_focus(self) -> None:
-        hints = "[j/k] week · [h/l] month · [Enter] open · [Tab] switch · [q] quit"
+        hints = "[j/k] week · [h/l] month · [Enter] open · [Tab] switch · [Esc] quit"
         try:
             self.screen.query_one("#hints", Static).update(Text(hints))
         except Exception:
