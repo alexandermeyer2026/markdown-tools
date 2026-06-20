@@ -71,9 +71,8 @@ class CalendarWidget(Widget, can_focus=True):
                 if day == 0:
                     row.append("    ", style="reverse" if is_sel else "")
                 elif is_current and day == today.day:
-                    # selected row: bold only (double-reverse doesn't work)
-                    # other rows: bold reverse to highlight today
-                    row.append(f"{day:2d}", style="bold" if is_sel else "bold reverse")
+                    today_style = "bold underline reverse" if is_sel else "bold underline"
+                    row.append(f"{day:2d}", style=today_style)
                     row.append("  ", style="reverse" if is_sel else "")
                 else:
                     row.append(f"{day:2d}  ", style="reverse" if is_sel else "")
@@ -119,4 +118,10 @@ class CalendarWidget(Widget, can_focus=True):
 
     def action_open_week(self) -> None:
         from tools.journal_tools.planner.week_screen import WeekScreen
-        self.app.push_screen(WeekScreen(self._planner, self._directory, self._week_offset()))
+
+        def _on_closed(_: object) -> None:
+            self.screen.reload_columns()
+
+        self.app.push_screen(
+            WeekScreen(self._planner, self._directory, self._week_offset()), _on_closed
+        )

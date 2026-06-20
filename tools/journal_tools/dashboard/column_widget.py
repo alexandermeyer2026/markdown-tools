@@ -5,11 +5,33 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Rule, Static
+from rich.console import Group
 
 from parser.file_model import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from tools.journal_tools.planner.state import PlannerState
+
+
+class ColumnHeader(Widget):
+    DEFAULT_CSS = """
+    ColumnHeader {
+        height: 1;
+    }
+    """
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self._title = title
+
+    def render(self) -> Group:
+        w = max(self.size.width, len(self._title) + 5)
+        bar = "─" * max(0, w - len(self._title) - 4)
+        t = Text()
+        t.append("── ", style="bright_black")
+        t.append(self._title, style="bold")
+        t.append(" " + bar, style="bright_black")
+        return Group(t)
 
 
 class DayEntry(Widget, can_focus=True):
@@ -101,6 +123,7 @@ class DayEntry(Widget, can_focus=True):
 
         def _on_closed(_: object) -> None:
             self._planner.reload_day_by_key(day_key)
+            self.screen.reload_columns()
 
         self.app.push_screen(DayScreen(self._planner, self._directory, fp, self._date), _on_closed)
 
@@ -111,6 +134,11 @@ class DayListColumn(Widget):
         width: 1fr;
         height: 1fr;
         overflow-y: auto;
+    }
+    DayListColumn Rule {
+        margin: 0;
+        color: $primary;
+        height: 1fr;
     }
     """
 
@@ -130,7 +158,7 @@ class DayListColumn(Widget):
     def compose(self) -> ComposeResult:
         total = sum(len(blocks) for _, _, blocks in self._entries)
         header = f"{self._title}{'  ·  ' + str(total) if total else ''}"
-        yield Static(Text.assemble(("── ", "bright_black"), (header, "bold")))
+        yield ColumnHeader(header)
 
         if not self._entries:
             yield Static(Text("  –", style="bright_black"))

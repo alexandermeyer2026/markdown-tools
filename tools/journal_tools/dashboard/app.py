@@ -7,7 +7,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Rule, Static
 
 from os_utils import FileFinder
 from parser.file_model import TaskBlock, parse
@@ -93,6 +93,11 @@ class DashboardScreen(Screen):
     #columns {
         height: 1fr;
     }
+    #columns Rule {
+        width: 1;
+        color: $primary;
+        margin: 0;
+    }
     #hints {
         height: 1;
         background: $primary;
@@ -131,12 +136,48 @@ class DashboardScreen(Screen):
             yield CalendarWidget(self._planner, self._directory)
         with Horizontal(id="columns"):
             yield DayListColumn("Overdue",  self._overdue,   self._planner, self._directory)
+            yield Rule(orientation="vertical")
             yield DayListColumn("Today",    self._today,     self._planner, self._directory)
+            yield Rule(orientation="vertical")
             yield DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory)
         yield Static("", id="hints")
 
     def on_mount(self) -> None:
         self.query_one(CalendarWidget).focus()
+
+    def reload_columns(self) -> None:
+        today = datetime.date.today()
+        overdue_by_date = _gather(
+            self._directory,
+            today - datetime.timedelta(days=_OVERDUE_DAYS),
+            today - datetime.timedelta(days=1),
+        )
+        fp_today, today_blocks = _tasks_for_date(self._directory, today)
+        upcoming_by_date = _gather(
+            self._directory,
+            today + datetime.timedelta(days=1),
+            today + datetime.timedelta(days=_UPCOMING_DAYS),
+        )
+        self._overdue = [
+            (d, fp, [b for b in blocks if b.task.status in ('todo', 'in progress', 'started')])
+            for d, (fp, blocks) in sorted(overdue_by_date.items())
+            if any(b.task.status in ('todo', 'in progress', 'started') for b in blocks)
+        ]
+        self._today = [(today, fp_today, today_blocks)]
+        self._upcoming = [
+            (d, fp, blocks)
+            for d, (fp, blocks) in sorted(upcoming_by_date.items())
+            if blocks
+        ]
+        columns = self.query_one("#columns")
+        columns.remove_children()
+        columns.mount(
+            DayListColumn("Overdue",  self._overdue,   self._planner, self._directory),
+            Rule(orientation="vertical"),
+            DayListColumn("Today",    self._today,     self._planner, self._directory),
+            Rule(orientation="vertical"),
+            DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory),
+        )
 
     def action_quit(self) -> None:
         self.app.exit()
