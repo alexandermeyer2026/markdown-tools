@@ -454,27 +454,34 @@ class WeekGrid(Widget, can_focus=True):
         self.app.push_screen(SaveDialog(), on_confirm)
 
     def action_quit(self) -> None:
+        def _close() -> None:
+            if len(self.app.screen_stack) > 2:
+                self.app.screen.dismiss(None)
+            else:
+                self.app.exit()
+
         if cache_has_changes(self._planner.days):
             from .save_dialog import SaveDialog
 
             def on_save(save: bool) -> None:
                 if save:
                     save_cache(self._planner.days, self._directory)
-                self.app.exit()
+                _close()
 
             self.app.push_screen(SaveDialog(), on_save)
         else:
-            self.app.exit()
+            _close()
 
 
 class WeekScreen(Screen):
-    def __init__(self, planner: PlannerState, directory: str):
+    def __init__(self, planner: PlannerState, directory: str, week_offset: int = 0):
         super().__init__()
         self._planner = planner
         self._directory = directory
+        self._week_offset = week_offset
 
     def compose(self) -> ComposeResult:
-        yield WeekGrid(self._planner, self._directory)
+        yield WeekGrid(self._planner, self._directory, self._week_offset)
 
     def on_mount(self) -> None:
         self.query_one(WeekGrid).focus()

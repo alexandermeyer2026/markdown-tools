@@ -33,6 +33,11 @@ class DashboardTool:
 
     @staticmethod
     def run(args, directory='.'):
+        from tools.journal_tools.dashboard.app import DashboardApp
+        DashboardApp(directory).run()
+
+    @staticmethod
+    def _run_static(args, directory='.'):
         today = datetime.date.today()
         now   = datetime.datetime.now()
 
