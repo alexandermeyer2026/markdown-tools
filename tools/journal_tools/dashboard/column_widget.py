@@ -10,6 +10,7 @@ from rich.console import Group
 
 from parser.file_model import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
+from models import get_minutes
 from tools.journal_tools.planner.state import PlannerState
 
 
@@ -40,7 +41,7 @@ class DayEntry(Widget, can_focus=True):
         height: auto;
         border: blank;
         padding: 0 1;
-        margin-bottom: 1;
+
     }
     DayEntry:focus {
         border: solid $warning;
@@ -80,9 +81,32 @@ class DayEntry(Widget, can_focus=True):
 
     def compose(self) -> ComposeResult:
         yield Static(Text(self._date_label(), style="bold"))
-        for block in self._blocks:
-            task = block.task
-            icon = STATUS_ICONS.get(task.status, "○")
+
+        today    = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days=1)
+        timed    = sorted([b for b in self._blocks if b.task.time],
+                          key=lambda b: get_minutes(b.task.time.start))
+        untimed  = [b for b in self._blocks if not b.task.time]
+
+        if timed and self._date in (today, tomorrow):
+            from tools.journal_tools.timeline_tool import TimelineTool
+            width = max(20, self.app.size.width // 3 - 4)
+            for line in TimelineTool.render_timeline_lines(timed, self._date, width):
+                yield Static(Text.from_ansi(line))
+        else:
+            for block in timed:
+                task  = block.task
+                icon  = STATUS_ICONS.get(task.status, "○")
+                style = STATUS_STYLES.get(task.status, "bright_black")
+                t = Text("  ")
+                t.append(icon, style=style)
+                t.append(f"  {task.time.to_str()}  {task.title}")
+                yield Static(t)
+                yield from self._subtask_statics(block)
+
+        for block in untimed:
+            task  = block.task
+            icon  = STATUS_ICONS.get(task.status, "○")
             style = STATUS_STYLES.get(task.status, "bright_black")
             t = Text("  ")
             t.append(icon, style=style)
