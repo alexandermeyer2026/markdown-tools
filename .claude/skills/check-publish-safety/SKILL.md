@@ -7,6 +7,7 @@ Check whether the project is safe to publish as open source. Scan for secrets, p
 1. List all tracked files:
    - Run `git ls-files` to get every file under version control.
    - Also run `git status` to catch untracked files that may accidentally end up in a release.
+   - When checking whether a specific file is tracked, always use `git ls-files --error-unmatch <file>` — plain `git ls-files <file>` exits 0 even when the file is not tracked, making `&& echo "tracked"` a false positive.
 
 2. Scan source files for hardcoded secrets:
    - Search for patterns like: `api_key`, `secret`, `password`, `token`, `auth`, `private_key`, `access_key` (case-insensitive) assigned to string literals.
@@ -32,6 +33,21 @@ Check whether the project is safe to publish as open source. Scan for secrets, p
 
 7. Check configuration and documentation files:
    - Read README, any docs, and config files for hardcoded endpoints, internal hostnames, or credentials used as examples.
+
+8. Check for private personal content:
+   This step is about content you may not want to share publicly — not secrets, but personal or contextual information that is fine on your own machine but potentially embarrassing or revealing if published.
+
+   a. **Scratchpad and notes files** — look for files like `working-memory.md`, `notes.md`, `TODO.md`, `scratch.*`, `NOTES`, `journal.md`, or any `.md` file in the root that isn't README/CONTRIBUTING/CHANGELOG. Read them and summarise what's in them; flag if they contain personal plans, private context, or internal information.
+
+   b. **Test fixtures with real personal data** — if the repo has fixture files that simulate user data (e.g. `tests/fixtures/**/*.md`, sample journal entries, example task lists), read a sample and check whether the content looks like real personal notes vs. clearly synthetic placeholder data. Real names, real project names, real dates combined with recognisable personal tasks are a red flag.
+
+   c. **Commit messages** — run `git log --all --pretty=format:"%s %b"` and scan for: real names of people or companies, internal project codenames, personal frustration ("fix that stupid bug", "revert John's change"), or references to non-public systems. Flag anything that would be awkward if publicly visible.
+
+   d. **TODO / FIXME / HACK comments** — grep for these in source files. Check whether they reference internal systems, real names, client names, or non-public architecture decisions that you would not want a stranger to read.
+
+   e. **Internal URLs and hostnames** — grep for `http://` and `https://` occurrences outside of README/docs. Flag any that point to internal/private hosts (e.g. `localhost` with specific ports is fine; `https://internal.mycompany.com` is not).
+
+   f. **Personal names in code** — grep for capitalised proper-noun sequences (e.g. two consecutive title-case words) in comments and strings that are not clearly example/placeholder values. This catches things like "Alice reviewed this" or "per Bob's request" that inadvertently reveal real collaborators.
 
 ## Output format
 
