@@ -1439,3 +1439,161 @@ class TestWeekGridHierarchyReorder(unittest.TestCase):
         self._write("- [ ] 9:00-10:00 Meeting\n- [ ] Task B\n")
         state, col, _ = asyncio.run(self._inspect(['J']))
         self.assertEqual(state.day(col).task_list[0].task.title, 'Meeting')
+
+
+class TestDayGridMultiselect(unittest.TestCase):
+    """Multiselect (Space / Escape) in DayGrid."""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False, encoding='utf-8'
+        )
+        self.tmp.write("- [ ] Task A\n- [ ] Task B\n- [ ] Task C\n")
+        self.tmp.close()
+        self.path = self.tmp.name
+        self.directory = os.path.dirname(self.path)
+
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def _write(self, content):
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    async def _inspect(self, keys):
+        app = PlannerApp(self.directory, file_path=self.path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            for key in keys:
+                await pilot.press(key)
+            grid = app.screen.query_one(DayGrid)
+            return grid._day(), grid._multiselect, grid.cursor_idx
+
+    def test_space_adds_to_multiselect_without_moving_cursor(self):
+        _, sel, idx = asyncio.run(self._inspect(['space']))
+        self.assertEqual(len(sel), 1)
+        self.assertEqual(sel[0].title, 'Task A')
+        self.assertEqual(idx, 0)
+
+    def test_space_twice_toggles_off(self):
+        _, sel, _ = asyncio.run(self._inspect(['space', 'space']))
+        self.assertEqual(sel, [])
+
+    def test_escape_clears_multiselect(self):
+        _, sel, _ = asyncio.run(self._inspect(['space', 'escape']))
+        self.assertEqual(sel, [])
+
+    def test_status_applies_to_selection_and_cursor(self):
+        # select A, move to B, d → A and B both done; C (not in scope) unchanged
+        day, _, _ = asyncio.run(self._inspect(['space', 'j', 'd']))
+        statuses = {b.task.title: b.task.status for b in day.task_list}
+        self.assertEqual(statuses['Task A'], 'done')
+        self.assertEqual(statuses['Task B'], 'done')
+        self.assertEqual(statuses['Task C'], 'todo')
+
+    def test_status_cursor_only_when_no_explicit_selection(self):
+        day, _, _ = asyncio.run(self._inspect(['d']))
+        statuses = {b.task.title: b.task.status for b in day.task_list}
+        self.assertEqual(statuses['Task A'], 'done')
+        self.assertEqual(statuses['Task B'], 'todo')
+
+    def test_delete_removes_selection_and_cursor_clears_multiselect(self):
+        # select A, j to B, D → A and B deleted; C survives; multiselect cleared
+        day, sel, _ = asyncio.run(self._inspect(['space', 'j', 'D']))
+        titles = [b.task.title for b in day.task_list]
+        self.assertNotIn('Task A', titles)
+        self.assertNotIn('Task B', titles)
+        self.assertIn('Task C', titles)
+        self.assertEqual(sel, [])
+
+    def test_shift_applies_to_all_selected_timed_tasks(self):
+        self._write("- [ ] 9:00 Task A\n- [ ] 10:00 Task B\n- [ ] Task C\n")
+        # select A (row 0), j to B (row 1), l → both A and B shift +15 min
+        day, _, _ = asyncio.run(self._inspect(['space', 'j', 'l']))
+        timed = {b.task.title: b.task.time for b in day.task_list if b.task.time}
+        self.assertEqual(timed['Task A'].start, '9:15')
+        self.assertEqual(timed['Task B'].start, '10:15')
+        self.assertNotIn('Task C', timed)
+
+
+class TestWeekGridMultiselect(unittest.TestCase):
+    """Multiselect (Space / Escape) in WeekGrid."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        # Wednesday 2024-01-10 (weekday=2 → col=2) with two root tasks
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write("- [ ] Task A\n- [ ] Task B\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _write(self, content):
+        with open(os.path.join(self.tmpdir, '2024-01-10.md'), 'w') as f:
+            f.write(content)
+
+    async def _inspect(self, keys, week_today='2024-01-10'):
+        fixed = datetime.date.fromisoformat(week_today)
+        mock_dt = MagicMock()
+        mock_dt.date.today.return_value = fixed
+        mock_dt.timedelta = datetime.timedelta
+        mock_dt.date.fromisoformat = datetime.date.fromisoformat
+        with patch('tools.journal_tools.planner.week_screen.datetime', mock_dt):
+            app = PlannerApp(self.tmpdir)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                for key in keys:
+                    await pilot.press(key)
+                grid = app.screen.query_one(WeekGrid)
+                return grid._state, grid.cursor_col, grid.cursor_row, grid._multiselect
+
+    def test_space_adds_root_task_without_moving_cursor(self):
+        _, col, row, sel = asyncio.run(self._inspect(['space']))
+        self.assertEqual(len(sel), 1)
+        self.assertEqual(sel[0][1].title, 'Task A')
+        self.assertEqual(col, 2)
+        self.assertEqual(row, 0)
+
+    def test_space_twice_toggles_off(self):
+        _, _, _, sel = asyncio.run(self._inspect(['space', 'space']))
+        self.assertEqual(sel, [])
+
+    def test_escape_clears_multiselect(self):
+        _, _, _, sel = asyncio.run(self._inspect(['space', 'escape']))
+        self.assertEqual(sel, [])
+
+    def test_space_on_subtask_is_noop(self):
+        self._write("- [ ] My task\n  - [ ] Sub\n")
+        # j → row=1 (subtask); space must not add it
+        _, _, _, sel = asyncio.run(self._inspect(['j', 'space']))
+        self.assertEqual(sel, [])
+
+    def test_status_applies_to_selection_and_cursor(self):
+        # select A (row 0), j to B (row 1), d → both done
+        state, col, _, _ = asyncio.run(self._inspect(['space', 'j', 'd']))
+        statuses = {b.task.title: b.task.status for b in state.day(col).task_list}
+        self.assertEqual(statuses['Task A'], 'done')
+        self.assertEqual(statuses['Task B'], 'done')
+
+    def test_status_cursor_only_when_no_explicit_selection(self):
+        state, col, _, _ = asyncio.run(self._inspect(['d']))
+        statuses = {b.task.title: b.task.status for b in state.day(col).task_list}
+        self.assertEqual(statuses['Task A'], 'done')
+        self.assertEqual(statuses['Task B'], 'todo')
+
+    def test_bulk_move_moves_selection_and_cursor_follows(self):
+        # select A (row 0), j to B (row 1), L → A and B move to Thursday (col 3)
+        # cursor must follow B to Thursday
+        state, col, _, _ = asyncio.run(self._inspect(['space', 'j', 'L']))
+        self.assertEqual(col, 3)
+        self.assertEqual(len(state.day(2).task_list), 0)
+        thu_titles = {b.task.title for b in state.day(3).task_list}
+        self.assertEqual(thu_titles, {'Task A', 'Task B'})
+
+    def test_delete_removes_selection_and_cursor(self):
+        # select A (row 0), j to B (row 1), D → both deleted
+        state, _, row, sel = asyncio.run(self._inspect(['space', 'j', 'D']))
+        self.assertEqual(len(state.day(2).task_list), 0)
+        self.assertEqual(sel, [])
+        self.assertEqual(row, -1)  # clamped to header when day is empty
