@@ -56,6 +56,8 @@ class WeekGrid(Widget, can_focus=True):
         Binding("ctrl+s", "save",               show=False),
         Binding("q",     "quit",              show=False),
         Binding("ctrl+c","quit",              show=False),
+        Binding("space",  "toggle_select",    show=False),
+        Binding("escape", "clear_select",     show=False),
     ]
 
     cursor_col: reactive[int] = reactive(0, repaint=True)
@@ -67,6 +69,7 @@ class WeekGrid(Widget, can_focus=True):
         self._directory = directory
         self._week_offset = week_offset
         self._state: WeekState | None = None
+        self._multiselect: list[tuple[str, Task]] = []
 
     def on_mount(self) -> None:
         self._load_week()
@@ -126,6 +129,7 @@ class WeekGrid(Widget, can_focus=True):
         max_rows = max((len(e) for e in expanded), default=0)
         max_rows = max(max_rows, 1)
 
+        sel_task_ids = {id(t) for _, t in self._multiselect}
         for row in range(max_rows):
             line = Text(_MARGIN)
             for col_idx in range(7):
@@ -133,7 +137,8 @@ class WeekGrid(Widget, can_focus=True):
                 is_sel = col_idx == self.cursor_col and row == self.cursor_row
                 if row < len(exp):
                     task, depth = exp[row]
-                    line.append_text(self._week_cell(task, depth, col_width, is_sel))
+                    is_in_sel = id(task) in sel_task_ids
+                    line.append_text(self._week_cell(task, depth, col_width, is_sel, is_in_sel))
                 elif is_sel:
                     line.append(" " * col_width, style="reverse")
                 else:
@@ -142,14 +147,14 @@ class WeekGrid(Widget, can_focus=True):
 
         lines.append(Text(""))
         hints = (
-            "[h/j/k/l] navigate  [H/L] move  [>] carry  "
+            "[h/j/k/l] navigate  [space] select  [esc] clear  [H/L] move  [>] carry  "
             "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [q] quit"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
         return Group(*lines)
 
-    def _week_cell(self, task: Task, depth: int, col_width: int, is_selected: bool) -> Text:
+    def _week_cell(self, task: Task, depth: int, col_width: int, is_selected: bool, is_in_sel: bool = False) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
         style = STATUS_STYLES.get(task.status, "bright_black")
 
@@ -166,7 +171,7 @@ class WeekGrid(Widget, can_focus=True):
                 t.append(indent)
                 t.append(icon, style=style)
             t.append(" ")
-            t.append(title_str, style="reverse" if is_selected else "")
+            t.append(title_str, style="reverse" if (is_selected or is_in_sel) else "")
             return t
 
         title_max = col_width - 4
@@ -174,7 +179,7 @@ class WeekGrid(Widget, can_focus=True):
         t = Text("> " if is_selected else "  ")
         t.append(icon, style=style)
         t.append(" ")
-        t.append(title_str, style="reverse" if is_selected else "")
+        t.append(title_str, style="reverse" if (is_selected or is_in_sel) else "")
         return t
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -197,6 +202,89 @@ class WeekGrid(Widget, can_focus=True):
         exp = week_expanded(self._state.day(self.cursor_col).task_list)
         if self.cursor_row >= len(exp):
             self.cursor_row = max(len(exp) - 1, -1)
+
+    def _in_sel(self, task: Task) -> bool:
+        return any(t is task for _, t in self._multiselect)
+
+    def _active_entries(self) -> list[tuple[str, Task]]:
+        result = list(self._multiselect)
+        cursor_task = self._selected_task()
+        if cursor_task and not self._in_sel(cursor_task):
+            result.append((self._selected_day().isoformat(), cursor_task))
+        return result
+
+    # ── Multiselect ───────────────────────────────────────────────────────────
+
+    def action_toggle_select(self) -> None:
+        task = self._selected_task()
+        if task is None or task.indent:
+            return
+        day_key = self._selected_day().isoformat()
+        if self._in_sel(task):
+            self._multiselect = [(k, t) for k, t in self._multiselect if t is not task]
+        else:
+            self._multiselect.append((day_key, task))
+        self.refresh()
+
+    def action_clear_select(self) -> None:
+        if self._multiselect:
+            self._multiselect = []
+            self.refresh()
+
+    def _move_task_to_adj_day(self, day_key: str, task: Task, direction: int) -> str:
+        if task.indent:
+            return day_key
+        try:
+            src_day = datetime.date.fromisoformat(day_key)
+        except ValueError:
+            return day_key
+        dst_day = src_day + datetime.timedelta(days=direction)
+        self._planner.load_day(dst_day)
+        src_cache = self._planner.days.get(day_key)
+        if src_cache:
+            block = src_cache.find_block(task)
+            if block:
+                src_cache.move_block_to(block, self._planner.days[dst_day.isoformat()])
+        return dst_day.isoformat()
+
+    def _bulk_move_selected(self, direction: int) -> None:
+        if self._state is None:
+            return
+        cursor_task = self._selected_task()
+        cursor_new_day: datetime.date | None = None
+
+        # Move explicitly selected tasks and update their day keys
+        new_multiselect = []
+        for day_key, task in self._multiselect:
+            new_key = self._move_task_to_adj_day(day_key, task, direction)
+            new_multiselect.append((new_key, task))
+            if task is cursor_task and new_key != day_key:
+                cursor_new_day = datetime.date.fromisoformat(new_key)
+        self._multiselect = new_multiselect
+
+        # Move cursor task separately if not already in explicit selection
+        if cursor_task and not self._in_sel(cursor_task):
+            day_key = self._selected_day().isoformat()
+            new_key = self._move_task_to_adj_day(day_key, cursor_task, direction)
+            if new_key != day_key:
+                cursor_new_day = datetime.date.fromisoformat(new_key)
+
+        # Follow the cursor to its new column if it moved within the week
+        if cursor_new_day is not None:
+            dst_col = next(
+                (i for i, d in enumerate(self._state.week_days) if d == cursor_new_day),
+                None,
+            )
+            if dst_col is not None:
+                self.cursor_col = dst_col
+                exp = week_expanded(self._state.day(dst_col).task_list)
+                self.cursor_row = next(
+                    (i for i, (t, _) in enumerate(exp) if t is cursor_task), 0
+                )
+                self.refresh()
+                return
+        self._clamp_row()
+        self.refresh()
 
     # ── Navigation actions ────────────────────────────────────────────────────
 
@@ -238,10 +326,11 @@ class WeekGrid(Widget, can_focus=True):
     # ── Task mutation actions ─────────────────────────────────────────────────
 
     def _set_status(self, status: str) -> None:
-        task = self._selected_task()
-        if task:
-            self._planner.days[self._selected_day().isoformat()].set_status(task, status)
-            self.refresh()
+        for day_key, task in self._active_entries():
+            cache = self._planner.days.get(day_key)
+            if cache:
+                cache.set_status(task, status)
+        self.refresh()
 
     def action_status_todo(self)        -> None: self._set_status("todo")
     def action_status_in_progress(self) -> None: self._set_status("in progress")
@@ -250,6 +339,9 @@ class WeekGrid(Widget, can_focus=True):
     def action_status_failed(self)      -> None: self._set_status("failed")
 
     def action_move_left(self) -> None:
+        if self._multiselect:
+            self._bulk_move_selected(-1)
+            return
         if self._state is None or self.cursor_row < 0:
             return
         new_col, new_row, week_exit = shift_task(
@@ -265,6 +357,9 @@ class WeekGrid(Widget, can_focus=True):
             self.cursor_row = new_row
 
     def action_move_right(self) -> None:
+        if self._multiselect:
+            self._bulk_move_selected(1)
+            return
         if self._state is None or self.cursor_row < 0:
             return
         new_col, new_row, week_exit = shift_task(
@@ -333,17 +428,20 @@ class WeekGrid(Widget, can_focus=True):
             self.refresh()
 
     def action_delete_task(self) -> None:
-        task = self._selected_task()
-        if task is None:
+        entries = list(self._active_entries())
+        if not entries:
             return
 
         def on_confirm(confirmed: bool) -> None:
             if not confirmed:
                 return
-            day_cache = self._planner.days[self._selected_day().isoformat()]
-            block = day_cache.find_block(task)
-            if block:
-                day_cache.remove_block(block)
+            for day_key, task in entries:
+                cache = self._planner.days.get(day_key)
+                if cache:
+                    block = cache.find_block(task)
+                    if block:
+                        cache.remove_block(block)
+            self._multiselect = []
             self._clamp_row()
             self.refresh()
 

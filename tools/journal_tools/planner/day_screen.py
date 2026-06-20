@@ -56,6 +56,8 @@ class DayGrid(Widget, can_focus=True):
         Binding("ctrl+s", "save",               show=False),
         Binding("q",     "quit",          show=False),
         Binding("ctrl+c","quit",          show=False),
+        Binding("space",  "toggle_select", show=False),
+        Binding("escape", "clear_select",  show=False),
     ]
 
     cursor_idx: reactive[int] = reactive(0, repaint=True)
@@ -73,6 +75,7 @@ class DayGrid(Widget, can_focus=True):
         self._file_path = file_path
         self._date = date
         self._day_key: str | None = None
+        self._multiselect: list[Task] = []
 
     def on_mount(self) -> None:
         self._day_key, _ = self._planner.load_file(self._file_path, self._date)
@@ -167,7 +170,7 @@ class DayGrid(Widget, can_focus=True):
 
         lines.append(Text(""))
         hints = (
-            "[j/k] move  [h/l] shift  [H/L] end time  [r] remove time  "
+            "[j/k] move  [space] select  [esc] clear  [h/l] shift  [H/L] end time  [r] remove time  "
             "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [q] back"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
@@ -191,6 +194,7 @@ class DayGrid(Widget, can_focus=True):
         icon_col = offset + bar_width + len(task.time.to_str()) + 2
         title_max = max(self.size.width - icon_col - 4, 0)
 
+        in_multi = self._in_sel(task)
         if is_sel:
             t = Text(" " * offset + "> ")
         else:
@@ -199,18 +203,19 @@ class DayGrid(Widget, can_focus=True):
         t.append(f" {task.time.to_str()} ")
         t.append(icon, style=style)
         t.append(" ")
-        t.append(task.title[:title_max], style="bold reverse" if is_sel else "bold")
+        t.append(task.title[:title_max], style="bold reverse" if (is_sel or in_multi) else "bold")
         return t
 
     def _untimed_task_row(self, task: Task, selected: Task | None) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
         style = STATUS_STYLES.get(task.status, "bright_black")
         is_sel = task is selected
+        in_multi = self._in_sel(task)
         title_max = max(self.size.width - 4, 0)
         t = Text("> " if is_sel else "  ")
         t.append(icon, style=style)
         t.append(" ")
-        t.append(task.title[:title_max], style="bold reverse" if is_sel else "bold")
+        t.append(task.title[:title_max], style="bold reverse" if (is_sel or in_multi) else "bold")
         return t
 
     def _body_rows(self, block: TaskBlock, depth: int = 0, time_offset: int = 0) -> list[Text]:
@@ -238,10 +243,16 @@ class DayGrid(Widget, can_focus=True):
             leading = " " * time_offset + "  " * depth
             title_max = max(self.size.width - len(leading) - 4, 0)
             t = Text(_MARGIN)
+            child_in_multi = self._in_sel(child)
             if child is selected:
                 t.append(leading[:-2] if len(leading) >= 2 else leading)
                 t.append("> ")
                 t.append(icon)
+                t.append(" ")
+                t.append(child.title[:title_max], style="reverse")
+            elif child_in_multi:
+                t.append(leading)
+                t.append(icon, style=STATUS_STYLES.get(child.status, "bright_black"))
                 t.append(" ")
                 t.append(child.title[:title_max], style="reverse")
             else:
@@ -279,6 +290,33 @@ class DayGrid(Widget, can_focus=True):
     def _has_changes(self) -> bool:
         return self._day().has_changes
 
+    def _in_sel(self, task: Task) -> bool:
+        return any(t is task for t in self._multiselect)
+
+    def _active_tasks(self) -> list[Task]:
+        result = list(self._multiselect)
+        cursor = self._selected()
+        if cursor and not self._in_sel(cursor):
+            result.append(cursor)
+        return result
+
+    # ── Multiselect ───────────────────────────────────────────────────────────
+
+    def action_toggle_select(self) -> None:
+        task = self._selected()
+        if task is None:
+            return
+        if self._in_sel(task):
+            self._multiselect = [t for t in self._multiselect if t is not task]
+        else:
+            self._multiselect.append(task)
+        self.refresh()
+
+    def action_clear_select(self) -> None:
+        if self._multiselect:
+            self._multiselect = []
+            self.refresh()
+
     def _do_save(self) -> None:
         save(self._day(), self._directory)
         self._day().update_checkpoint()
@@ -297,31 +335,34 @@ class DayGrid(Widget, can_focus=True):
 
     # ── Time manipulation ─────────────────────────────────────────────────────
 
+    def _new_time_for(self, task: Task, direction: int) -> TaskTime:
+        if task.time is None:
+            return TaskTime(start="12:00")
+        start_m = get_minutes(task.time.start)
+        if task.time.end:
+            end_m = get_minutes(task.time.end)
+            duration = end_m - start_m
+            new_start = max(0, min(start_m + direction * _STEP_M, 24 * 60 - duration))
+            return TaskTime(
+                start=minutes_to_time(new_start),
+                end=minutes_to_time(new_start + duration),
+            )
+        new_start = max(0, min(start_m + direction * _STEP_M, 23 * 60 + 45))
+        return TaskTime(start=minutes_to_time(new_start))
+
     def _shift_selected(self, direction: int) -> None:
-        task = self._selected()
-        if task is None or task.indent:
+        tasks = [t for t in self._active_tasks() if not t.indent]
+        if not tasks:
             return
         day = self._day()
-        if task.time is None:
-            new_time = TaskTime(start="12:00")
-        else:
-            start_m = get_minutes(task.time.start)
-            if task.time.end:
-                end_m = get_minutes(task.time.end)
-                duration = end_m - start_m
-                new_start = max(0, min(start_m + direction * _STEP_M, 24 * 60 - duration))
-                new_time = TaskTime(
-                    start=minutes_to_time(new_start),
-                    end=minutes_to_time(new_start + duration),
-                )
-            else:
-                new_start = max(0, min(start_m + direction * _STEP_M, 23 * 60 + 45))
-                new_time = TaskTime(start=minutes_to_time(new_start))
-        day.set_time(task, new_time)
-        nav = self._navigable()
-        self.cursor_idx = next(
-            (i for i, t in enumerate(nav) if t is task), self.cursor_idx
-        )
+        for task in tasks:
+            day.set_time(task, self._new_time_for(task, direction))
+        cursor = self._selected()
+        if cursor:
+            nav = self._navigable()
+            self.cursor_idx = next(
+                (i for i, t in enumerate(nav) if t is cursor), self.cursor_idx
+            )
         self.refresh()
 
     def action_shift_left(self)  -> None: self._shift_selected(-1)
@@ -364,10 +405,10 @@ class DayGrid(Widget, can_focus=True):
     # ── Status ────────────────────────────────────────────────────────────────
 
     def _set_status(self, status: str) -> None:
-        task = self._selected()
-        if task:
-            self._day().set_status(task, status)
-            self.refresh()
+        day = self._day()
+        for task in self._active_tasks():
+            day.set_status(task, status)
+        self.refresh()
 
     def action_status_todo(self)        -> None: self._set_status("todo")
     def action_status_in_progress(self) -> None: self._set_status("in progress")
@@ -462,17 +503,19 @@ class DayGrid(Widget, can_focus=True):
         self.app.push_screen(TaskFormScreen(), on_result)
 
     def action_delete_task(self) -> None:
-        task = self._selected()
-        if task is None:
+        tasks = list(self._active_tasks())
+        if not tasks:
             return
 
         def on_confirm(confirmed: bool) -> None:
             if not confirmed:
                 return
             day = self._day()
-            block = day.find_block(task)
-            if block:
-                day.remove_block(block)
+            for task in tasks:
+                block = day.find_block(task)
+                if block:
+                    day.remove_block(block)
+            self._multiselect = []
             nav = self._navigable()
             self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
             self.refresh()
