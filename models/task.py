@@ -47,6 +47,7 @@ class Task:
     time: Optional[TaskTime]
     line_number: int
     indent: str = ''
+    tags: list[str] = field(default_factory=list)
 
     def to_line(self) -> str:
         status_char = status_char_map().get(self.status, '?')

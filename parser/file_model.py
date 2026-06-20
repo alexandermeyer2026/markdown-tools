@@ -8,6 +8,9 @@ from config import get_task_config
 from models import Task, TaskTime
 
 
+_TAG_LINE_RE = re.compile(r'^\s*(#[\w-]+)(\s+#[\w-]+)*\s*$')
+
+
 @dataclass
 class RawLine:
     raw: str  # exact line content, including newline
@@ -18,9 +21,26 @@ class TaskBlock:
     task: Task
     header: str       # exact header line; call refresh_header() after mutating task
     nodes: list = field(default_factory=list)  # list[Node], body in document order
+    tag_node: Optional[RawLine] = field(default=None)  # RawLine holding the tag line, if any
 
     def refresh_header(self) -> None:
         self.header = self.task.to_line() + '\n'
+
+    def refresh_tags(self) -> None:
+        """Sync task.tags back to the body. Call after mutating task.tags."""
+        if self.task.tags:
+            tag_content = ' '.join(f'#{t}' for t in self.task.tags)
+            if self.tag_node is not None:
+                existing_indent = re.match(r'^(\s*)', self.tag_node.raw).group(1)
+                self.tag_node.raw = existing_indent + tag_content + '\n'
+            else:
+                tag_indent = self.task.indent + '  '
+                self.tag_node = RawLine(tag_indent + tag_content + '\n')
+                self.nodes.append(self.tag_node)
+        else:
+            if self.tag_node is not None:
+                self.nodes[:] = [n for n in self.nodes if n is not self.tag_node]
+                self.tag_node = None
 
 
 Node = Union[RawLine, TaskBlock]
@@ -77,6 +97,19 @@ def _parse_task_from_line(line: str, line_number: int = -1) -> Task | None:
     return Task(title=title, status=status, time=task_time, line_number=line_number, indent=indent)
 
 
+def _extract_tags(nodes: list[Node]) -> None:
+    """Walk the tree and populate task.tags + tag_node from dedicated tag lines."""
+    for node in nodes:
+        if not isinstance(node, TaskBlock):
+            continue
+        for child in node.nodes:
+            if isinstance(child, RawLine) and _TAG_LINE_RE.match(child.raw):
+                node.task.tags = re.findall(r'#([\w-]+)', child.raw)
+                node.tag_node = child
+                break
+        _extract_tags(node.nodes)
+
+
 def parse_lines(lines: list[str]) -> list[Node]:
     """Parse a list of lines into an ordered node list."""
     top_level: list[Node] = []
@@ -109,6 +142,7 @@ def parse_lines(lines: list[str]) -> list[Node]:
                     break
             owner_nodes.append(RawLine(line))
 
+    _extract_tags(top_level)
     return top_level
 
 
