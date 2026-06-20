@@ -47,6 +47,7 @@ class Task:
     time: Optional[TaskTime]
     line_number: int
     indent: str = ''
+    priority: Optional[str] = None
     tags: list[str] = field(default_factory=list)
 
     def to_line(self) -> str:
@@ -54,5 +55,7 @@ class Task:
         line = f"{self.indent}- [{status_char}]"
         if self.time:
             line += f" {self.time.to_str()}"
+        if self.priority:
+            line += f" {self.priority}"
         line += f" {self.title}"
         return line

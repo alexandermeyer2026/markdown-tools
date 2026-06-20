@@ -94,7 +94,12 @@ def _parse_task_from_line(line: str, line_number: int = -1) -> Task | None:
         )
 
     title = re.sub(config['time_pattern'], '', task_head).strip()
-    return Task(title=title, status=status, time=task_time, line_number=line_number, indent=indent)
+    priority = None
+    priority_match = re.match(r'^(!{1,3})\s+(.*)', title)
+    if priority_match:
+        priority = priority_match.group(1)
+        title = priority_match.group(2)
+    return Task(title=title, status=status, time=task_time, line_number=line_number, indent=indent, priority=priority)
 
 
 def _extract_tags(nodes: list[Node]) -> None:

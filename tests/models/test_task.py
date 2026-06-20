@@ -56,6 +56,26 @@ class TestToLine(unittest.TestCase):
         task = self._task(indent='\t', time=TaskTime(start='8:30', end='9:00'))
         self.assertEqual(task.to_line(), '\t- [ ] 8:30-9:00 Do thing')
 
+    def test_priority_low(self):
+        task = self._task(priority='!')
+        self.assertEqual(task.to_line(), '- [ ] ! Do thing')
+
+    def test_priority_medium(self):
+        task = self._task(priority='!!')
+        self.assertEqual(task.to_line(), '- [ ] !! Do thing')
+
+    def test_priority_high(self):
+        task = self._task(priority='!!!')
+        self.assertEqual(task.to_line(), '- [ ] !!! Do thing')
+
+    def test_priority_with_time(self):
+        task = self._task(time=TaskTime(start='10:00'), priority='!!')
+        self.assertEqual(task.to_line(), '- [ ] 10:00 !! Do thing')
+
+    def test_no_priority(self):
+        task = self._task(priority=None)
+        self.assertEqual(task.to_line(), '- [ ] Do thing')
+
 
 if __name__ == '__main__':
     unittest.main()
