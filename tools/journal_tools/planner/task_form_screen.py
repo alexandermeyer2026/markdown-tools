@@ -245,7 +245,7 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
         child_blocks: list = []
         if block:
             body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
-            body_str = textwrap.dedent('\n'.join(body_lines)).strip()
+            body_str = textwrap.dedent('\n'.join(body_lines)).lstrip('\n')
             child_blocks = [n for n in block.nodes if isinstance(n, TaskBlock)]
         with VerticalGroup():
             yield Label("Title")
@@ -298,7 +298,7 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
             status = "todo"
         time_start = self.query_one("#time_start", Input).value.strip() or None
         time_end = self.query_one("#time_end", Input).value.strip() or None
-        body = self.query_one("#body", TextArea).text.strip() or None
+        body = self.query_one("#body", TextArea).text.lstrip('\n') or None
         subtasks = self.query_one(SubtaskList)._children
         self.dismiss(TaskFormResult(
             title=title,
