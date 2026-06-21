@@ -9,11 +9,12 @@ from unittest.mock import patch
 
 from parser.file_model import RawLine, TaskBlock, parse, parse_lines, serialize
 from models import Task, TaskTime
+from tools.journal_tools.cli_utils import parse_date_flags
 from tools.journal_tools.notion_tool import (
     CSV_FIELDNAMES,
     NotionTool,
     _collect_rows,
-    _parse_date_flags,
+    _count_task_runs,
     _replace_task_runs,
     _row_to_task_block,
     _rows_to_nodes,
@@ -358,41 +359,70 @@ class TestReplaceTaskRuns(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# _count_task_runs
+# ---------------------------------------------------------------------------
+
+class TestCountTaskRuns(unittest.TestCase):
+    def test_no_tasks(self):
+        self.assertEqual(_count_task_runs([RawLine('# Heading\n')]), 0)
+
+    def test_single_run(self):
+        nodes = [_make_block('A'), _make_block('B')]
+        self.assertEqual(_count_task_runs(nodes), 1)
+
+    def test_two_runs_separated_by_prose(self):
+        nodes = [_make_block('A'), RawLine('\n'), RawLine('## Section\n'), _make_block('B')]
+        self.assertEqual(_count_task_runs(nodes), 2)
+
+    def test_prose_only(self):
+        nodes = [RawLine('# H\n'), RawLine('\n')]
+        self.assertEqual(_count_task_runs(nodes), 0)
+
+    def test_contiguous_tasks_count_as_one(self):
+        nodes = [_make_block('A'), _make_block('B'), _make_block('C')]
+        self.assertEqual(_count_task_runs(nodes), 1)
+
+
+# ---------------------------------------------------------------------------
 # _parse_date_flags
 # ---------------------------------------------------------------------------
 
 class TestParseDateFlags(unittest.TestCase):
     def test_no_flags(self):
-        remaining, date_from, date_to = _parse_date_flags(['out.csv'])
+        remaining, date_from, date_to = parse_date_flags(['out.csv'])
         self.assertEqual(remaining, ['out.csv'])
         self.assertIsNone(date_from)
         self.assertIsNone(date_to)
 
     def test_from_flag(self):
-        remaining, date_from, date_to = _parse_date_flags(['--from', '2026-06-01'])
+        remaining, date_from, date_to = parse_date_flags(['--from', '2026-06-01'])
         self.assertEqual(remaining, [])
         self.assertEqual(date_from, datetime.date(2026, 6, 1))
         self.assertIsNone(date_to)
 
     def test_to_flag(self):
-        remaining, date_from, date_to = _parse_date_flags(['--to', '2026-06-30'])
+        remaining, date_from, date_to = parse_date_flags(['--to', '2026-06-30'])
         self.assertIsNone(date_from)
         self.assertEqual(date_to, datetime.date(2026, 6, 30))
 
     def test_from_and_to(self):
-        remaining, date_from, date_to = _parse_date_flags(
+        remaining, date_from, date_to = parse_date_flags(
             ['--from', '2026-06-01', '--to', '2026-06-30']
         )
         self.assertEqual(date_from, datetime.date(2026, 6, 1))
         self.assertEqual(date_to, datetime.date(2026, 6, 30))
 
     def test_positional_preserved(self):
-        remaining, _, _ = _parse_date_flags(['out.csv', '--from', '2026-06-01'])
+        remaining, _, _ = parse_date_flags(['out.csv', '--from', '2026-06-01'])
         self.assertEqual(remaining, ['out.csv'])
 
     def test_invalid_date_exits(self):
         with self.assertRaises(SystemExit):
-            _parse_date_flags(['--from', 'not-a-date'])
+            parse_date_flags(['--from', 'not-a-date'])
+
+    def test_trailing_flag_without_value_exits(self):
+        with self.assertRaises(SystemExit):
+            parse_date_flags(['--from'])
 
 
 # ---------------------------------------------------------------------------
@@ -663,6 +693,28 @@ class TestNotionToolImport(unittest.TestCase):
         result = Path(self.tmp, '2026-06-21.md').read_text()
         self.assertIn('Morning standup', result)
         self.assertIn('Write report', result)
+
+    def test_multi_section_file_is_updated(self):
+        _write_journal(self.tmp, '2026-06-21', '- [ ] A\n\n## Section 2\n\n- [ ] B\n')
+        csv_path = _write_csv(self.tmp, [{
+            'Title': 'New', 'Status': 'todo', 'Date': '2026-06-21',
+            'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
+        }])
+        with self._confirm(), patch('builtins.print'):
+            NotionTool.import_([csv_path], self.tmp)
+        self.assertIn('New', Path(self.tmp, '2026-06-21.md').read_text())
+
+    def test_multi_section_file_prints_warning(self):
+        _write_journal(self.tmp, '2026-06-21', '- [ ] A\n\n## Section 2\n\n- [ ] B\n')
+        csv_path = _write_csv(self.tmp, [{
+            'Title': 'New', 'Status': 'todo', 'Date': '2026-06-21',
+            'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
+        }])
+        with self._confirm(), patch('builtins.print') as mock_print:
+            NotionTool.import_([csv_path], self.tmp)
+        printed = ' '.join(str(c[0][0]) for c in mock_print.call_args_list)
+        self.assertIn('Warning', printed)
+        self.assertIn('2026-06-21', printed)
 
     def test_import_multiple_files(self):
         _write_journal(self.tmp, '2026-06-10', '- [ ] A\n')

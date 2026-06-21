@@ -7,13 +7,13 @@ from unittest.mock import patch
 
 from models import Task, TaskTime
 from parser.file_model import RawLine, TaskBlock
+from tools.journal_tools.cli_utils import parse_date_flags
 from tools.journal_tools.ics_tool import (
     IcsTool,
     _build_ics,
     _collect_vevent_lines,
     _escape,
     _make_uid,
-    _parse_date_flags,
     _parse_time,
     _task_to_vevent_lines,
 )
@@ -336,31 +336,35 @@ class TestBuildIcs(unittest.TestCase):
 
 class TestParseDateFlags(unittest.TestCase):
     def test_no_flags(self):
-        remaining, date_from, date_to = _parse_date_flags(['out.ics'])
+        remaining, date_from, date_to = parse_date_flags(['out.ics'])
         self.assertEqual(remaining, ['out.ics'])
         self.assertIsNone(date_from)
         self.assertIsNone(date_to)
 
     def test_from_flag(self):
-        _, date_from, _ = _parse_date_flags(['--from', '2026-06-01'])
+        _, date_from, _ = parse_date_flags(['--from', '2026-06-01'])
         self.assertEqual(date_from, datetime.date(2026, 6, 1))
 
     def test_to_flag(self):
-        _, _, date_to = _parse_date_flags(['--to', '2026-06-30'])
+        _, _, date_to = parse_date_flags(['--to', '2026-06-30'])
         self.assertEqual(date_to, datetime.date(2026, 6, 30))
 
     def test_both_flags(self):
-        _, date_from, date_to = _parse_date_flags(['--from', '2026-06-01', '--to', '2026-06-30'])
+        _, date_from, date_to = parse_date_flags(['--from', '2026-06-01', '--to', '2026-06-30'])
         self.assertEqual(date_from, datetime.date(2026, 6, 1))
         self.assertEqual(date_to, datetime.date(2026, 6, 30))
 
     def test_positional_preserved(self):
-        remaining, _, _ = _parse_date_flags(['out.ics', '--from', '2026-06-01'])
+        remaining, _, _ = parse_date_flags(['out.ics', '--from', '2026-06-01'])
         self.assertEqual(remaining, ['out.ics'])
 
     def test_invalid_date_exits(self):
         with self.assertRaises(SystemExit):
-            _parse_date_flags(['--from', 'not-a-date'])
+            parse_date_flags(['--from', 'not-a-date'])
+
+    def test_trailing_flag_without_value_exits(self):
+        with self.assertRaises(SystemExit):
+            parse_date_flags(['--to'])
 
 
 # ---------------------------------------------------------------------------

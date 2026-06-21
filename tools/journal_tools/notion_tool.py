@@ -5,9 +5,10 @@ import sys
 
 from config import get_indent_step
 from models import Task, TaskTime
-from os_utils import BackupManager, FileFinder, resolve_date
+from os_utils import BackupManager, FileFinder
 from os_utils.file_writer import FileWriter
 from parser.file_model import RawLine, TaskBlock, parse, serialize
+from tools.journal_tools.cli_utils import parse_date_flags
 
 
 CSV_FIELDNAMES = ['Title', 'Status', 'Date', 'Time Start', 'Time End', 'Priority', 'Tags', 'Depth']
@@ -78,27 +79,17 @@ def _rows_to_nodes(rows: list[dict]) -> list:
     return top
 
 
-def _parse_date_flags(args: list[str]) -> tuple[list[str], datetime.date | None, datetime.date | None]:
-    """Strip --from/--to flags from args and return (remaining_args, date_from, date_to)."""
-    remaining = []
-    date_from = date_to = None
-    i = 0
-    while i < len(args):
-        if args[i] in ('--from', '--to') and i + 1 < len(args):
-            flag, value = args[i], args[i + 1]
-            date = resolve_date(value)
-            if date is None:
-                print(f"Invalid date for {flag}: {value}")
-                sys.exit(1)
-            if flag == '--from':
-                date_from = date
-            else:
-                date_to = date
-            i += 2
+def _count_task_runs(nodes: list) -> int:
+    count = 0
+    in_run = False
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            if not in_run:
+                count += 1
+                in_run = True
         else:
-            remaining.append(args[i])
-            i += 1
-    return remaining, date_from, date_to
+            in_run = False
+    return count
 
 
 def _replace_task_runs(original_nodes: list, new_task_nodes: list) -> list:
@@ -119,7 +110,7 @@ def _replace_task_runs(original_nodes: list, new_task_nodes: list) -> list:
 class NotionTool:
     @staticmethod
     def export(args: list[str], journal_dir: str) -> None:
-        positional, date_from, date_to = _parse_date_flags(args)
+        positional, date_from, date_to = parse_date_flags(args)
         output_path = positional[0] if positional else 'notion_export.csv'
 
         files = FileFinder.find_journal_files(journal_dir, date_from=date_from, date_to=date_to)
@@ -138,7 +129,7 @@ class NotionTool:
 
     @staticmethod
     def import_(args: list[str], journal_dir: str) -> None:
-        positional, date_from, date_to = _parse_date_flags(args)
+        positional, date_from, date_to = parse_date_flags(args)
         if not positional:
             print("Usage: journal notion-import <input.csv> [--from DATE] [--to DATE]")
             sys.exit(1)
@@ -188,6 +179,9 @@ class NotionTool:
         for date in sorted(matched):
             file_path = matched[date]
             nodes = parse(file_path)
+            runs = _count_task_runs(nodes)
+            if runs > 1:
+                print(f"  Warning: {date}.md has {runs} task sections — consolidating into one")
             new_task_nodes = _rows_to_nodes(by_date[date])
             new_nodes = _replace_task_runs(nodes, new_task_nodes)
             content = serialize(new_nodes)

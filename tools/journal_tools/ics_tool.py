@@ -2,8 +2,9 @@ import datetime
 import sys
 import uuid
 
-from os_utils import FileFinder, resolve_date
+from os_utils import FileFinder
 from parser.file_model import TaskBlock, parse
+from tools.journal_tools.cli_utils import parse_date_flags
 
 
 STATUS_MAP = {
@@ -92,32 +93,10 @@ def _build_ics(all_events: list[list[str]]) -> str:
     return '\r\n'.join(lines) + '\r\n'
 
 
-def _parse_date_flags(args: list[str]) -> tuple[list[str], datetime.date | None, datetime.date | None]:
-    remaining = []
-    date_from = date_to = None
-    i = 0
-    while i < len(args):
-        if args[i] in ('--from', '--to') and i + 1 < len(args):
-            flag, value = args[i], args[i + 1]
-            date = resolve_date(value)
-            if date is None:
-                print(f"Invalid date for {flag}: {value}")
-                sys.exit(1)
-            if flag == '--from':
-                date_from = date
-            else:
-                date_to = date
-            i += 2
-        else:
-            remaining.append(args[i])
-            i += 1
-    return remaining, date_from, date_to
-
-
 class IcsTool:
     @staticmethod
     def export(args: list[str], journal_dir: str) -> None:
-        positional, date_from, date_to = _parse_date_flags(args)
+        positional, date_from, date_to = parse_date_flags(args)
         output_path = positional[0] if positional else 'journal_export.ics'
 
         files = FileFinder.find_journal_files(journal_dir, date_from=date_from, date_to=date_to)

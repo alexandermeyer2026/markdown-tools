@@ -44,15 +44,21 @@ export default function Dashboard() {
     }
   }
 
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   async function handleExportIcs() {
     try {
       const res = await api.get('/files/export/ics', { responseType: 'blob' })
-      const url = URL.createObjectURL(res.data as Blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'journal.ics'
-      a.click()
-      URL.revokeObjectURL(url)
+      triggerDownload(res.data as Blob, 'journal.ics')
     } catch {
       alert('Export failed')
     }
@@ -61,12 +67,7 @@ export default function Dashboard() {
   async function handleDownload(date: string) {
     try {
       const res = await api.get(`/files/${date}/download`, { responseType: 'blob' })
-      const url = URL.createObjectURL(res.data as Blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${date}.md`
-      a.click()
-      URL.revokeObjectURL(url)
+      triggerDownload(res.data as Blob, `${date}.md`)
     } catch {
       alert('Download failed')
     }
