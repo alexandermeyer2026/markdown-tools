@@ -126,7 +126,7 @@ class DayEntry(Widget, can_focus=True):
             yield from self._subtask_statics(child_block, depth + 1)
 
     def on_focus(self) -> None:
-        hints = "[Enter] open day · [Tab] next day · [Esc] quit"
+        hints = "[Enter] open day · [Tab] next day · [r] refresh · [Esc] quit"
         try:
             self.screen.query_one("#hints", Static).update(Text(hints))
         except Exception:

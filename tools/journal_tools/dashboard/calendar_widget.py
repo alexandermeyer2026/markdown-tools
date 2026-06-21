@@ -48,7 +48,7 @@ class CalendarWidget(Widget, can_focus=True):
         self.selected_week = next((i for i, w in enumerate(weeks) if today.day in w), 0)
 
     def on_focus(self) -> None:
-        hints = "[j/k] week · [h/l] month · [Enter] open · [Tab] switch · [Esc] quit"
+        hints = "[j/k] week · [h/l] month · [Enter] open · [Tab] switch · [r] refresh · [Esc] quit"
         try:
             self.screen.query_one("#hints", Static).update(Text(hints))
         except Exception:

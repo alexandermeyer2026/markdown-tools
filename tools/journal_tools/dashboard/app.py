@@ -109,6 +109,7 @@ class DashboardScreen(Screen):
     BINDINGS = [
         Binding("escape", "quit", show=False),
         Binding("ctrl+c", "quit", show=False),
+        Binding("r", "refresh_data", "Refresh", show=True),
     ]
 
     def __init__(
@@ -178,6 +179,9 @@ class DashboardScreen(Screen):
             Rule(orientation="vertical"),
             DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory),
         )
+
+    def action_refresh_data(self) -> None:
+        self.reload_columns()
 
     def action_quit(self) -> None:
         self.app.exit()
