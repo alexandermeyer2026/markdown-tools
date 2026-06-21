@@ -300,6 +300,10 @@ class TestBuildIcs(unittest.TestCase):
         self.assertIn('VERSION:2.0', result)
         self.assertIn('PRODID:', result)
 
+    def test_calname_header(self):
+        result = _build_ics([])
+        self.assertIn('X-WR-CALNAME:Journal', result)
+
     def test_crlf_line_endings(self):
         result = _build_ics([])
         self.assertIn('\r\n', result)

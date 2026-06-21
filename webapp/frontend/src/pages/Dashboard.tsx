@@ -44,6 +44,20 @@ export default function Dashboard() {
     }
   }
 
+  async function handleExportIcs() {
+    try {
+      const res = await api.get('/files/export/ics', { responseType: 'blob' })
+      const url = URL.createObjectURL(res.data as Blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'journal.ics'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Export failed')
+    }
+  }
+
   async function handleDownload(date: string) {
     try {
       const res = await api.get(`/files/${date}/download`, { responseType: 'blob' })
@@ -73,6 +87,9 @@ export default function Dashboard() {
       <header className="topbar">
         <span className="topbar-title">Journal</span>
         <div className="topbar-actions">
+          <button className="btn-ghost" onClick={handleExportIcs}>
+            Export ICS
+          </button>
           <button
             className="btn-ghost"
             onClick={() => fileInputRef.current?.click()}

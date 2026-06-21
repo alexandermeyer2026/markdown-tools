@@ -84,6 +84,7 @@ def _build_ics(all_events: list[list[str]]) -> str:
         'VERSION:2.0',
         'PRODID:-//markdown-tools//journal//EN',
         'CALSCALE:GREGORIAN',
+        'X-WR-CALNAME:Journal',
     ]
     for event_lines in all_events:
         lines.extend(event_lines)

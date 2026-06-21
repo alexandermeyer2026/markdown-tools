@@ -1,9 +1,12 @@
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from .auth import get_current_user
 from .deps import _DATE_RE, journal_dir, resolve_journal_file
+from tools.journal_tools.ics_tool import _build_ics, _collect_vevent_lines
+from os_utils import FileFinder
+from parser.file_model import parse
 
 router = APIRouter()
 
@@ -34,6 +37,23 @@ async def upload_file(file: UploadFile = File(...), _user=Depends(get_current_us
         raise HTTPException(status_code=400, detail="Invalid filename")
     dest.write_bytes(content)
     return {"date": stem, "message": "uploaded"}
+
+
+@router.get("/export/ics")
+def export_ics(_user=Depends(get_current_user)):
+    files = FileFinder.find_journal_files(str(journal_dir()))
+    all_events = []
+    counter = [0]
+    for file_path in files:
+        date = FileFinder.get_journal_file_date(file_path)
+        nodes = parse(file_path)
+        all_events.extend(_collect_vevent_lines(nodes, date, counter))
+    content = _build_ics(all_events)
+    return Response(
+        content=content.encode('utf-8'),
+        media_type='text/calendar',
+        headers={'Content-Disposition': 'attachment; filename="journal.ics"'},
+    )
 
 
 @router.get("/{date}/download")
