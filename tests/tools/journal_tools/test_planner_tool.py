@@ -1683,3 +1683,57 @@ class TestWeekGridMultiselect(unittest.TestCase):
         self.assertEqual(len(state.day(2).task_list), 0)
         self.assertEqual(sel, [])
         self.assertEqual(row, -1)  # clamped to header when day is empty
+
+    def test_cursor_nav_right_across_week_boundary_clamps_row(self):
+        # Cursor on Sunday row=0 (task present), l → Monday of next week which is empty.
+        # cursor_row must clamp to -1 so the cursor is visible on the day header.
+        with open(os.path.join(self.tmpdir, '2024-01-14.md'), 'w') as f:
+            f.write("- [ ] Sunday Task\n")
+        state, col, row, _ = asyncio.run(
+            self._inspect(['l', 'l', 'l', 'l', 'j', 'l'])
+        )
+        self.assertEqual(col, 0)           # Monday of next week
+        self.assertEqual(row, -1)          # clamped to header (no tasks on Monday)
+        self.assertEqual(state.week_days[0], datetime.date(2024, 1, 15))
+
+    def test_bulk_move_right_crosses_week_boundary(self):
+        # Sunday Jan 14 = col 6; space-select, L → must advance to next week, cursor at Monday
+        with open(os.path.join(self.tmpdir, '2024-01-14.md'), 'w') as f:
+            f.write("- [ ] Sunday Task\n")
+        # Navigate right 4× to reach Sun col=6; passing through empty columns drops
+        # cursor_row to -1, so press j to land on the task before selecting.
+        state, col, row, _ = asyncio.run(
+            self._inspect(['l', 'l', 'l', 'l', 'j', 'space', 'L'])
+        )
+        self.assertEqual(col, 0)
+        self.assertEqual(row, 0)
+        self.assertEqual(state.week_days[0], datetime.date(2024, 1, 15))
+        self.assertEqual(state.day(0).task_list[0].task.title, 'Sunday Task')
+
+    def test_bulk_move_left_crosses_week_boundary(self):
+        # Monday Jan 8 = col 0; space-select, H → must retreat to prev week, cursor at Sunday
+        with open(os.path.join(self.tmpdir, '2024-01-08.md'), 'w') as f:
+            f.write("- [ ] Monday Task\n")
+        # Navigate left 2× to reach Mon col=0; j to land on the task before selecting.
+        state, col, row, _ = asyncio.run(
+            self._inspect(['h', 'h', 'j', 'space', 'H'])
+        )
+        self.assertEqual(col, 6)
+        self.assertEqual(row, 0)
+        self.assertEqual(state.week_days[0], datetime.date(2024, 1, 1))
+        self.assertEqual(state.day(6).task_list[0].task.title, 'Monday Task')
+
+    def test_bulk_move_cursor_not_in_selection_crosses_week_boundary(self):
+        # Explicit selection (Task A on Wed) stays in-week; cursor task on Sunday crosses.
+        # This exercises the second branch of _bulk_move_selected where cursor_task is
+        # not in _multiselect but still triggers a week transition.
+        with open(os.path.join(self.tmpdir, '2024-01-14.md'), 'w') as f:
+            f.write("- [ ] Sunday Task\n")
+        # Space-select Task A (Wed col=2), navigate to Sun (col=6), j to land on task, L
+        state, col, row, _ = asyncio.run(
+            self._inspect(['space', 'l', 'l', 'l', 'l', 'j', 'L'])
+        )
+        self.assertEqual(col, 0)
+        self.assertEqual(row, 0)
+        self.assertEqual(state.week_days[0], datetime.date(2024, 1, 15))
+        self.assertEqual(state.day(0).task_list[0].task.title, 'Sunday Task')

@@ -282,12 +282,19 @@ class WeekGrid(Widget, can_focus=True):
             if new_key != day_key:
                 cursor_new_day = datetime.date.fromisoformat(new_key)
 
-        # Follow the cursor to its new column if it moved within the week
+        # Follow the cursor to its new column, reloading the week if necessary
         if cursor_new_day is not None:
             dst_col = next(
                 (i for i, d in enumerate(self._state.week_days) if d == cursor_new_day),
                 None,
             )
+            if dst_col is None:
+                self._week_offset += direction
+                self._load_week()
+                dst_col = next(
+                    (i for i, d in enumerate(self._state.week_days) if d == cursor_new_day),
+                    None,
+                )
             if dst_col is not None:
                 self.cursor_col = dst_col
                 exp = week_expanded(self._state.day(dst_col).task_list)
@@ -323,7 +330,7 @@ class WeekGrid(Widget, can_focus=True):
             self.cursor_col = 6
         else:
             self.cursor_col -= 1
-            self._clamp_row()
+        self._clamp_row()
 
     def action_cursor_right(self) -> None:
         if self._state is None:
@@ -334,7 +341,7 @@ class WeekGrid(Widget, can_focus=True):
             self.cursor_col = 0
         else:
             self.cursor_col += 1
-            self._clamp_row()
+        self._clamp_row()
 
     # ── Task mutation actions ─────────────────────────────────────────────────
 
