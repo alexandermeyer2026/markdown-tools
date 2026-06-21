@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 from os_utils import FileFinder, resolve_date
-from tools.journal_tools import CatchUpTool, DashboardTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool
+from tools.journal_tools import CatchUpTool, DashboardTool, NotionTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool
 
 
 def _open_journal_for_date(date_string: str, directory: str) -> None:
@@ -40,6 +40,8 @@ def main():
         'dashboard': lambda a: DashboardTool.run(a, journal_dir),
         'sync':         lambda a: SyncTool.run(a, journal_dir),
         'time-machine': lambda a: TimeMachineTool.run(a, journal_dir),
+        'notion-export': lambda a: NotionTool.export(a, journal_dir),
+        'notion-import': lambda a: NotionTool.import_(a, journal_dir),
     }
 
     if sub in subcommands:
