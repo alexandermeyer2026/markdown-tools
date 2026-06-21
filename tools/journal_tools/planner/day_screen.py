@@ -367,10 +367,10 @@ class DayGrid(Widget, can_focus=True):
         tasks = [t for t in self._active_tasks() if not t.indent]
         if not tasks:
             return
+        cursor = self._selected()
         day = self._day()
         for task in tasks:
             day.set_time(task, self._new_time_for(task, direction))
-        cursor = self._selected()
         if cursor:
             nav = self._navigable()
             self.cursor_idx = next(
