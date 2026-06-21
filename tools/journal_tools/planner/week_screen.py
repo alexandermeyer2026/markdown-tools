@@ -584,6 +584,10 @@ class WeekGrid(Widget, can_focus=True):
             def on_save(save: bool) -> None:
                 if save:
                     save_cache(self._planner.days, self._directory)
+                else:
+                    for day in self._planner.days.values():
+                        if day.has_changes:
+                            day.discard()
                 _close()
 
             self.app.push_screen(SaveDialog(), on_save)
