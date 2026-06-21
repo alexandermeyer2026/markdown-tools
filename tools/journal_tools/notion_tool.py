@@ -1,10 +1,11 @@
 import csv
+import datetime
 import os
 import sys
 
 from config import get_indent_step
 from models import Task, TaskTime
-from os_utils import BackupManager, FileFinder
+from os_utils import BackupManager, FileFinder, resolve_date
 from os_utils.file_writer import FileWriter
 from parser.file_model import RawLine, TaskBlock, parse, serialize
 
@@ -77,6 +78,29 @@ def _rows_to_nodes(rows: list[dict]) -> list:
     return top
 
 
+def _parse_date_flags(args: list[str]) -> tuple[list[str], datetime.date | None, datetime.date | None]:
+    """Strip --from/--to flags from args and return (remaining_args, date_from, date_to)."""
+    remaining = []
+    date_from = date_to = None
+    i = 0
+    while i < len(args):
+        if args[i] in ('--from', '--to') and i + 1 < len(args):
+            flag, value = args[i], args[i + 1]
+            date = resolve_date(value)
+            if date is None:
+                print(f"Invalid date for {flag}: {value}")
+                sys.exit(1)
+            if flag == '--from':
+                date_from = date
+            else:
+                date_to = date
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+    return remaining, date_from, date_to
+
+
 def _replace_task_runs(original_nodes: list, new_task_nodes: list) -> list:
     result = []
     tasks_placed = False
@@ -95,9 +119,10 @@ def _replace_task_runs(original_nodes: list, new_task_nodes: list) -> list:
 class NotionTool:
     @staticmethod
     def export(args: list[str], journal_dir: str) -> None:
-        output_path = args[0] if args else 'notion_export.csv'
+        positional, date_from, date_to = _parse_date_flags(args)
+        output_path = positional[0] if positional else 'notion_export.csv'
 
-        files = FileFinder.find_journal_files(journal_dir)
+        files = FileFinder.find_journal_files(journal_dir, date_from=date_from, date_to=date_to)
         rows = []
         for file_path in files:
             date = FileFinder.get_journal_file_date(file_path)
@@ -113,17 +138,28 @@ class NotionTool:
 
     @staticmethod
     def import_(args: list[str], journal_dir: str) -> None:
-        if not args:
-            print("Usage: journal notion-import <input.csv>")
+        positional, date_from, date_to = _parse_date_flags(args)
+        if not positional:
+            print("Usage: journal notion-import <input.csv> [--from DATE] [--to DATE]")
             sys.exit(1)
 
-        input_path = args[0]
+        input_path = positional[0]
         with open(input_path, 'r', newline='', encoding='utf-8') as f:
             rows = list(csv.DictReader(f))
 
         by_date: dict[str, list[dict]] = {}
         for row in rows:
-            by_date.setdefault(row['Date'], []).append(row)
+            date_str = row['Date']
+            if date_from or date_to:
+                try:
+                    d = datetime.date.fromisoformat(date_str)
+                except ValueError:
+                    continue
+                if date_from and d < date_from:
+                    continue
+                if date_to and d > date_to:
+                    continue
+            by_date.setdefault(date_str, []).append(row)
 
         all_files = {
             FileFinder.get_journal_file_date(fp).isoformat(): fp
