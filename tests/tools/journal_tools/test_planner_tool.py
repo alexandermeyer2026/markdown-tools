@@ -61,6 +61,21 @@ class TestWeekCacheChanges(unittest.TestCase):
         cache['2024-01-15'].set_status(child, 'done')
         self.assertTrue(cache_has_changes(cache))
 
+    def test_add_block_no_separator_when_no_trailing_blank(self):
+        existing = task_to_block(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
+        day = DayCache(file_path=None, nodes=[existing])
+        new_block = task_to_block(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
+        day.add_block(new_block)
+        self.assertEqual(serialize(day.nodes), '- [ ] Existing\n- [ ] New\n')
+
+    def test_add_block_no_separator_when_trailing_blank_already_present(self):
+        existing = task_to_block(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
+        existing.nodes.append(RawLine('\n'))
+        day = DayCache(file_path=None, nodes=[existing])
+        new_block = task_to_block(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
+        day.add_block(new_block)
+        self.assertEqual(serialize(day.nodes), '- [ ] Existing\n\n- [ ] New\n')
+
 
 class TestPlannerState(unittest.TestCase):
 

@@ -147,8 +147,16 @@ class SubtaskList(Widget, can_focus=True):
             ops.set_status(selected_block, result.status)
             ops.set_time(selected_block, new_time)
             ops.set_title(selected_block, result.title)
+            trailing = []
+            for node in reversed(selected_block.nodes):
+                if isinstance(node, RawLine) and not node.raw.strip():
+                    trailing.insert(0, node)
+                else:
+                    break
             rebuilt = task_to_block(task, result.body, result.subtasks)
-            selected_block.nodes[:] = rebuilt.nodes
+            while rebuilt.nodes and isinstance(rebuilt.nodes[-1], RawLine) and not rebuilt.nodes[-1].raw.strip():
+                rebuilt.nodes.pop()
+            selected_block.nodes[:] = rebuilt.nodes + trailing
             self.refresh(layout=True)
 
         self.app.push_screen(TaskFormScreen(selected_block), on_result)
@@ -244,7 +252,7 @@ class TaskFormScreen(ModalScreen[TaskFormResult | None]):
             body_lines = [n.raw.rstrip('\n') for n in block.nodes if isinstance(n, RawLine)]
             while body_lines and not body_lines[-1].strip():
                 body_lines.pop()
-            body_str = textwrap.dedent('\n'.join(body_lines)).lstrip('\n')
+            body_str = textwrap.dedent('\n'.join(body_lines))
             child_blocks = [n for n in block.nodes if isinstance(n, TaskBlock)]
         with VerticalGroup():
             yield Label("Title")
