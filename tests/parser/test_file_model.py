@@ -342,5 +342,84 @@ class TestTags(unittest.TestCase):
         self.assertEqual(child.task.tags, ['household'])
 
 
+# ── FieldRange ────────────────────────────────────────────────────────────────
+
+class TestFieldRanges(unittest.TestCase):
+
+    def _block(self, line: str) -> TaskBlock:
+        nodes = parse_str(line if line.endswith('\n') else line + '\n')
+        return nodes[0]
+
+    def _sliced(self, block: TaskBlock, range_attr: str) -> str | None:
+        r = getattr(block, range_attr)
+        if r is None:
+            return None
+        return block.header.rstrip('\n')[r.start:r.end]
+
+    def test_checkbox_range_todo(self):
+        block = self._block('- [ ] Buy milk')
+        self.assertEqual(self._sliced(block, 'checkbox_range'), ' ')
+
+    def test_checkbox_range_done(self):
+        block = self._block('- [x] Buy milk')
+        self.assertEqual(self._sliced(block, 'checkbox_range'), 'x')
+
+    def test_title_range_simple(self):
+        block = self._block('- [ ] Buy milk')
+        self.assertEqual(self._sliced(block, 'title_range'), 'Buy milk')
+
+    def test_time_range_present(self):
+        block = self._block('- [ ] 09:00-10:00 Meeting')
+        self.assertEqual(self._sliced(block, 'time_range'), '09:00-10:00 ')
+
+    def test_time_range_absent(self):
+        block = self._block('- [ ] Buy milk')
+        self.assertIsNone(block.time_range)
+
+    def test_title_range_after_time(self):
+        block = self._block('- [ ] 09:00-10:00 Meeting')
+        self.assertEqual(self._sliced(block, 'title_range'), 'Meeting')
+
+    def test_priority_range_present(self):
+        block = self._block('- [ ] !!! Buy groceries')
+        self.assertEqual(self._sliced(block, 'priority_range'), '!!!')
+
+    def test_priority_range_absent(self):
+        block = self._block('- [ ] Buy milk')
+        self.assertIsNone(block.priority_range)
+
+    def test_title_range_after_priority(self):
+        block = self._block('- [ ] !!! Buy groceries')
+        self.assertEqual(self._sliced(block, 'title_range'), 'Buy groceries')
+
+    def test_time_and_priority(self):
+        block = self._block('- [ ] 10:00 !! Pick up Mike')
+        self.assertEqual(self._sliced(block, 'time_range'), '10:00 ')
+        self.assertEqual(self._sliced(block, 'priority_range'), '!!')
+        self.assertEqual(self._sliced(block, 'title_range'), 'Pick up Mike')
+
+    def test_indented_task_ranges(self):
+        block = self._block('  - [x] !!! Buy groceries')
+        self.assertEqual(self._sliced(block, 'checkbox_range'), 'x')
+        self.assertEqual(self._sliced(block, 'priority_range'), '!!!')
+        self.assertEqual(self._sliced(block, 'title_range'), 'Buy groceries')
+
+    def test_colon_separator_included_in_time_range(self):
+        block = self._block('- [ ] 9:00: Meeting')
+        self.assertEqual(self._sliced(block, 'time_range'), '9:00: ')
+        self.assertEqual(self._sliced(block, 'title_range'), 'Meeting')
+
+    def test_ranges_cover_full_header(self):
+        line = '- [ ] 09:00-10:00 !!! Meeting'
+        block = self._block(line)
+        # Every field range must point into valid positions
+        for attr in ('checkbox_range', 'time_range', 'priority_range', 'title_range'):
+            r = getattr(block, attr)
+            if r is not None:
+                self.assertGreaterEqual(r.start, 0)
+                self.assertLessEqual(r.end, len(line))
+                self.assertLessEqual(r.start, r.end)
+
+
 if __name__ == '__main__':
     unittest.main()

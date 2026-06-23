@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Optional, Union
 
 from config import get_task_config
 from models import Task, TaskTime
 
 
 _TAG_LINE_RE = re.compile(r'^\s*(#[\w-]+)(\s+#[\w-]+)*\s*$')
+
+
+@dataclass
+class FieldRange:
+    """Inclusive start, exclusive end column offsets within a header line (trailing newline excluded)."""
+    start: int
+    end: int
+
+    def slice(self, s: str) -> str:
+        return s[self.start:self.end]
 
 
 @dataclass
@@ -22,6 +32,10 @@ class TaskBlock:
     header: str       # exact header line; call refresh_header() after mutating task
     nodes: list = field(default_factory=list)  # list[Node], body in document order
     tag_node: Optional[RawLine] = field(default=None)  # RawLine holding the tag line, if any
+    checkbox_range: Optional[FieldRange] = field(default=None)
+    time_range: Optional[FieldRange] = field(default=None)
+    priority_range: Optional[FieldRange] = field(default=None)
+    title_range: Optional[FieldRange] = field(default=None)
 
     def refresh_header(self) -> None:
         self.header = self.task.to_line() + '\n'
@@ -66,6 +80,45 @@ def all_tasks(nodes: list) -> list[Task]:
             result.append(node.task)
             result.extend(all_tasks(node.nodes))
     return result
+
+
+def _compute_field_ranges(line: str) -> tuple[FieldRange, Optional[FieldRange], Optional[FieldRange], FieldRange] | None:
+    """
+    Compute column offsets for each field in a task header line.
+    Returns (checkbox_range, time_range, priority_range, title_range) or None if not a task line.
+    """
+    config = get_task_config()
+    cbx_match = re.search(config['checkbox_pattern'], line)
+    if not cbx_match:
+        return None
+
+    line_body = line.rstrip('\n')
+    checkbox_range = FieldRange(cbx_match.start(1), cbx_match.end(1))
+
+    content_offset = cbx_match.end()
+    if content_offset < len(line_body) and line_body[content_offset] == ' ':
+        content_offset += 1
+
+    content = line_body[content_offset:]
+    time_match = re.search(config['time_pattern'], content)
+    if time_match:
+        time_range: Optional[FieldRange] = FieldRange(content_offset + time_match.start(), content_offset + time_match.end())
+        after_time_offset = content_offset + time_match.end()
+    else:
+        time_range = None
+        after_time_offset = content_offset
+
+    after_time = line_body[after_time_offset:]
+    priority_match = re.match(r'^(!{1,3})\s+(.*)', after_time)
+    if priority_match:
+        priority_range: Optional[FieldRange] = FieldRange(after_time_offset + priority_match.start(1), after_time_offset + priority_match.end(1))
+        title_offset = after_time_offset + priority_match.start(2)
+    else:
+        priority_range = None
+        title_offset = after_time_offset
+
+    title_range = FieldRange(title_offset, len(line_body))
+    return checkbox_range, time_range, priority_range, title_range
 
 
 def _parse_task_from_line(line: str, line_number: int = -1) -> Task | None:
@@ -129,7 +182,16 @@ def parse_lines(lines: list[str]) -> list[Node]:
             indent_len = len(task.indent)
             while stack and stack[-1][0] >= indent_len:
                 stack.pop()
-            block = TaskBlock(task=task, header=line)
+            ranges = _compute_field_ranges(line)
+            cbx_r, time_r, pri_r, title_r = ranges
+            block = TaskBlock(
+                task=task,
+                header=line,
+                checkbox_range=cbx_r,
+                time_range=time_r,
+                priority_range=pri_r,
+                title_range=title_r,
+            )
             current_nodes().append(block)
             stack.append((indent_len, block))
         elif not line.strip():
