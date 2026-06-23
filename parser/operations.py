@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from models.task import TaskTime, status_char_map
-from parser.file_model import FieldRange, TaskBlock, compute_field_ranges
+from models.task import Task, TaskTime, status_char_map
+from parser.file_model import FieldRange, RawLine, TaskBlock, compute_field_ranges
 
 
 def _refresh_ranges(block: TaskBlock) -> None:
@@ -76,3 +76,27 @@ def set_priority(block: TaskBlock, new_priority: Optional[str]) -> str:
     block.task.priority = new_priority
     _refresh_ranges(block)
     return block.header
+
+
+def insert_task(nodes: list, task: Task) -> TaskBlock:
+    """Append task as a new TaskBlock at the end of nodes, preceded by a blank line."""
+    if nodes:
+        last = nodes[-1]
+        if isinstance(last, TaskBlock):
+            last.nodes.append(RawLine('\n'))
+        else:
+            nodes.append(RawLine('\n'))
+
+    header = task.to_line() + '\n'
+    ranges = compute_field_ranges(header) or (None, None, None, None)
+    cbx_r, time_r, pri_r, title_r = ranges
+    block = TaskBlock(
+        task=task,
+        header=header,
+        checkbox_range=cbx_r,
+        time_range=time_r,
+        priority_range=pri_r,
+        title_range=title_r,
+    )
+    nodes.append(block)
+    return block

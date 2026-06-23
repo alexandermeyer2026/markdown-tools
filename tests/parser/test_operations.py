@@ -4,9 +4,9 @@ import os
 import tempfile
 import unittest
 
-from models.task import TaskTime
-from parser.file_model import parse, serialize
-from parser.operations import set_priority, set_status, set_time, set_title
+from models.task import Task, TaskTime
+from parser.file_model import RawLine, TaskBlock, parse, serialize
+from parser.operations import insert_task, set_priority, set_status, set_time, set_title
 
 
 def _block(line: str):
@@ -213,6 +213,82 @@ class TestSetPriority(unittest.TestCase):
         b = _block('- [ ] !!! Buy groceries')
         set_priority(b, None)
         self.assertEqual(serialize([b]), '- [ ] Buy groceries\n')
+
+
+# ── insert_task ───────────────────────────────────────────────────────────────
+
+class TestInsertTask(unittest.TestCase):
+
+    def _task(self, title='New task', status='todo', time=None, indent=''):
+        return Task(title=title, status=status, time=time, line_number=-1, indent=indent)
+
+    def test_appends_to_empty_list(self):
+        nodes = []
+        insert_task(nodes, self._task())
+        self.assertEqual(len(nodes), 1)
+        self.assertIsInstance(nodes[0], TaskBlock)
+
+    def test_no_blank_line_when_empty(self):
+        nodes = []
+        insert_task(nodes, self._task())
+        self.assertEqual(serialize(nodes), '- [ ] New task\n')
+
+    def test_blank_line_after_taskblock(self):
+        b = _block('- [ ] Existing task')
+        nodes = [b]
+        insert_task(nodes, self._task('Second task'))
+        self.assertEqual(serialize(nodes), '- [ ] Existing task\n\n- [ ] Second task\n')
+
+    def test_blank_goes_into_preceding_taskblock_nodes(self):
+        b = _block('- [ ] Existing task')
+        nodes = [b]
+        insert_task(nodes, self._task('Second task'))
+        # blank line belongs to the preceding TaskBlock, not top-level
+        self.assertEqual(len(nodes), 2)
+        self.assertIsInstance(nodes[1], TaskBlock)
+        self.assertIsInstance(b.nodes[-1], RawLine)
+        self.assertEqual(b.nodes[-1].raw, '\n')
+
+    def test_blank_line_after_rawline(self):
+        nodes = [RawLine('# Heading\n')]
+        insert_task(nodes, self._task())
+        self.assertEqual(serialize(nodes), '# Heading\n\n- [ ] New task\n')
+
+    def test_blank_appended_to_toplevel_after_rawline(self):
+        raw = RawLine('# Heading\n')
+        nodes = [raw]
+        insert_task(nodes, self._task())
+        self.assertEqual(len(nodes), 3)  # raw, blank, task
+
+    def test_returns_taskblock(self):
+        nodes = []
+        result = insert_task(nodes, self._task())
+        self.assertIsInstance(result, TaskBlock)
+
+    def test_returned_block_has_correct_header(self):
+        nodes = []
+        block = insert_task(nodes, self._task('Buy milk'))
+        self.assertEqual(block.header, '- [ ] Buy milk\n')
+
+    def test_field_ranges_populated(self):
+        nodes = []
+        block = insert_task(nodes, self._task('Buy milk'))
+        self.assertIsNotNone(block.checkbox_range)
+        self.assertIsNotNone(block.title_range)
+        self.assertEqual(block.header[block.title_range.start:block.title_range.end], 'Buy milk')
+
+    def test_insert_task_with_time(self):
+        nodes = []
+        task = self._task('Meeting', time=TaskTime(start='09:00', end='10:00'))
+        block = insert_task(nodes, task)
+        self.assertEqual(block.header, '- [ ] 09:00-10:00 Meeting\n')
+        self.assertIsNotNone(block.time_range)
+
+    def test_roundtrip_two_inserts(self):
+        nodes = []
+        insert_task(nodes, self._task('First'))
+        insert_task(nodes, self._task('Second'))
+        self.assertEqual(serialize(nodes), '- [ ] First\n\n- [ ] Second\n')
 
 
 if __name__ == '__main__':
