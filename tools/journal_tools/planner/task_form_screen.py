@@ -13,6 +13,7 @@ from textual.widgets import Button, Input, Label, Select, TextArea
 
 from config import get_indent_step
 from models import Task, TaskTime
+import parser.operations as ops
 from parser.file_model import RawLine, TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS
 from .weekly import task_to_block
@@ -140,16 +141,12 @@ class SubtaskList(Widget, can_focus=True):
             if result is None:
                 return
             task = selected_block.task
-            task.title = result.title
-            task.status = result.status
-            if result.time_start:
-                task.time = TaskTime(
-                    start=result.time_start,
-                    end=result.time_end if result.time_end else None,
-                )
-            else:
-                task.time = None
-            selected_block.refresh_header()
+            new_time = (TaskTime(start=result.time_start,
+                                  end=result.time_end if result.time_end else None)
+                        if result.time_start else None)
+            ops.set_status(selected_block, result.status)
+            ops.set_time(selected_block, new_time)
+            ops.set_title(selected_block, result.title)
             rebuilt = task_to_block(task, result.body, result.subtasks)
             selected_block.nodes[:] = rebuilt.nodes
             self.refresh(layout=True)

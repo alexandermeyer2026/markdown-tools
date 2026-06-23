@@ -4,7 +4,7 @@ import os
 from config import get_indent_step
 from models import Task, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter
-from parser.file_model import RawLine, TaskBlock, parse, serialize
+from parser.file_model import RawLine, TaskBlock, compute_field_ranges, parse, serialize
 from .state import DayCache, WeekState
 from .utils import week_expanded
 
@@ -176,7 +176,12 @@ def task_to_block(task: Task, body: str | None = None, subtask_blocks: list | No
             child_block.task.indent = (task.indent or '') + indent_step
         child_block.refresh_header()
         nodes.append(child_block)
-    return TaskBlock(task=task, header=task.to_line() + '\n', nodes=nodes)
+    header = task.to_line() + '\n'
+    ranges = compute_field_ranges(header) or (None, None, None, None)
+    cbx_r, time_r, pri_r, title_r = ranges
+    return TaskBlock(task=task, header=header, nodes=nodes,
+                     checkbox_range=cbx_r, time_range=time_r,
+                     priority_range=pri_r, title_range=title_r)
 
 
 def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:

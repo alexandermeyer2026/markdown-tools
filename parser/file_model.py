@@ -39,6 +39,9 @@ class TaskBlock:
 
     def refresh_header(self) -> None:
         self.header = self.task.to_line() + '\n'
+        result = compute_field_ranges(self.header)
+        if result is not None:
+            self.checkbox_range, self.time_range, self.priority_range, self.title_range = result
 
     def refresh_tags(self) -> None:
         """Sync task.tags back to the body. Call after mutating task.tags."""

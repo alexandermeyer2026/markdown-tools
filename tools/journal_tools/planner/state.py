@@ -3,7 +3,8 @@ import os
 
 from models import Task
 from os_utils import FileFinder
-from parser.file_model import RawLine, TaskBlock, parse, serialize
+from parser.file_model import RawLine, TaskBlock, compute_field_ranges, parse, serialize
+import parser.operations as ops
 
 
 def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
@@ -78,32 +79,37 @@ class DayCache:
     def set_status(self, task, status: str) -> None:
         if task.status == status:
             return
-        task.status = status
         block = self.find_block(task)
         if block:
-            block.refresh_header()
+            ops.set_status(block, status)
+        else:
+            task.status = status
         self._bump()
 
     def set_time(self, task, time) -> None:
         from .weekly import sort_timed_nodes
         if task.time == time:
             return
-        task.time = time
         block = self.find_block(task)
         if block:
-            block.refresh_header()
+            ops.set_time(block, time)
+        else:
+            task.time = time
         sort_timed_nodes(self.nodes)
         self._bump()
 
     def update_task(self, task, title: str, status: str, time, body, subtasks) -> None:
         from .weekly import sort_timed_nodes, task_to_block
         before = serialize(self.nodes)
-        task.title = title
-        task.status = status
-        task.time = time
         block = self.find_block(task)
-        if block:
-            block.refresh_header()
+        if block is None:
+            task.title = title
+            task.status = status
+            task.time = time
+        else:
+            ops.set_status(block, status)
+            ops.set_time(block, time)
+            ops.set_title(block, title)
             # Trailing blank RawLines are inter-task gaps owned by this block;
             # they are not body content and must survive an edit unchanged.
             trailing = []
@@ -157,7 +163,11 @@ class DayCache:
         ]
         self._bump()
         new_task = Task(title=task.title, status="todo", time=None, line_number=-1, indent="")
-        new_block = TaskBlock(task=new_task, header=new_task.to_line() + '\n', nodes=list(unfinished))
+        _header = new_task.to_line() + '\n'
+        _ranges = compute_field_ranges(_header) or (None, None, None, None)
+        new_block = TaskBlock(task=new_task, header=_header, nodes=list(unfinished),
+                              checkbox_range=_ranges[0], time_range=_ranges[1],
+                              priority_range=_ranges[2], title_range=_ranges[3])
         from .weekly import append_block
         append_block(dst.nodes, new_block)
         dst._bump()
