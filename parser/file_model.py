@@ -82,7 +82,7 @@ def all_tasks(nodes: list) -> list[Task]:
     return result
 
 
-def _compute_field_ranges(line: str) -> tuple[FieldRange, Optional[FieldRange], Optional[FieldRange], FieldRange] | None:
+def compute_field_ranges(line: str) -> tuple[FieldRange, Optional[FieldRange], Optional[FieldRange], FieldRange] | None:
     """
     Compute column offsets for each field in a task header line.
     Returns (checkbox_range, time_range, priority_range, title_range) or None if not a task line.
@@ -182,7 +182,7 @@ def parse_lines(lines: list[str]) -> list[Node]:
             indent_len = len(task.indent)
             while stack and stack[-1][0] >= indent_len:
                 stack.pop()
-            ranges = _compute_field_ranges(line)
+            ranges = compute_field_ranges(line)
             cbx_r, time_r, pri_r, title_r = ranges
             block = TaskBlock(
                 task=task,
