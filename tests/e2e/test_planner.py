@@ -1,7 +1,15 @@
+import os
+
 from textual.widgets import Input, Select, TextArea
 
+from models.task import Task
+from parser.file_model import TaskBlock, parse, serialize
+from parser.operations import insert_task
 from tools.journal_tools.planner.save_dialog import SaveDialog
 from tools.journal_tools.planner.task_form_screen import TaskFormScreen
+
+_INPUT_DIR = os.path.join(os.path.dirname(__file__), 'fixtures', 'input')
+_EXPECTED_DIR = os.path.join(os.path.dirname(__file__), 'fixtures', 'expected', 'planner', 'day')
 
 
 async def _save(pilot, app):
@@ -320,3 +328,35 @@ def test_day_remove_time(run_planner_scenario):
         await _save(pilot, app)
 
     run_planner_scenario(run, "day/remove_time", date="2024-01-02")
+
+
+def _task(title, indent=''):
+    return Task(title=title, status='todo', time=None, line_number=-1, indent=indent)
+
+
+def _expected(scenario, filename):
+    path = os.path.join(_EXPECTED_DIR, scenario, filename)
+    with open(path, encoding='utf-8') as f:
+        return f.read()
+
+
+def test_day_insert_top_level_no_preceding_blank():
+    """New top-level task appended to file with no trailing blank — follows directly, gets trailing blank."""
+    nodes = parse(os.path.join(_INPUT_DIR, '2024-01-03.md'))
+    insert_task(nodes, _task('standup'))
+    assert serialize(nodes) == _expected('insert_top_level_no_preceding_blank', '2024-01-03.md')
+
+
+def test_day_insert_top_level_with_preceding_blank():
+    """New top-level task appended to file whose last task already has a trailing blank — blank is preserved as separator."""
+    nodes = parse(os.path.join(_INPUT_DIR, '2024-01-02.md'))
+    insert_task(nodes, _task('standup'))
+    assert serialize(nodes) == _expected('insert_top_level_with_preceding_blank', '2024-01-02.md')
+
+
+def test_day_insert_subtask():
+    """New subtask appended to parent — no blank lines added anywhere."""
+    nodes = parse(os.path.join(_INPUT_DIR, '2024-01-03.md'))
+    parent = next(n for n in nodes if isinstance(n, TaskBlock))
+    insert_task(parent.nodes, _task('Retrospective', indent='    '))
+    assert serialize(nodes) == _expected('insert_subtask', '2024-01-03.md')

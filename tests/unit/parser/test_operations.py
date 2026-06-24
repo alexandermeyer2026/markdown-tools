@@ -206,43 +206,44 @@ class TestInsertTask(unittest.TestCase):
     def _task(self, title='New task', status='todo', time=None, indent=''):
         return Task(title=title, status=status, time=time, line_number=-1, indent=indent)
 
-    def test_appends_to_empty_list(self):
+    # ── scenario 1: top-level task appended to previous content ───────────────
+
+    def test_top_level_appended_without_preceding_blank(self):
+        # preceding block has no trailing blank → new task appended directly after
+        b = _block('- [ ] Existing')
+        nodes = [b]
+        insert_task(nodes, self._task('New'))
+        self.assertEqual(serialize(nodes), '- [ ] Existing\n- [ ] New\n\n')
+
+    def test_top_level_appended_with_preceding_blank(self):
+        # preceding block already ends with a blank → separator is preserved as-is
+        b = _block('- [ ] Existing')
+        b.nodes.append(RawLine('\n'))
+        nodes = [b]
+        insert_task(nodes, self._task('New'))
+        self.assertEqual(serialize(nodes), '- [ ] Existing\n\n- [ ] New\n\n')
+
+    # ── scenario 2: top-level task has trailing blank line ────────────────────
+
+    def test_top_level_trailing_blank(self):
         nodes = []
         insert_task(nodes, self._task())
-        self.assertEqual(len(nodes), 1)
-        self.assertIsInstance(nodes[0], TaskBlock)
+        self.assertEqual(serialize(nodes), '- [ ] New task\n\n')
 
-    def test_no_blank_line_when_empty(self):
+    # ── scenario 3: subtask gets no leading or trailing blank line ─────────────
+
+    def test_subtask_no_blank_lines(self):
         nodes = []
-        insert_task(nodes, self._task())
-        self.assertEqual(serialize(nodes), '- [ ] New task\n')
+        insert_task(nodes, self._task('Child', indent='  '))
+        self.assertEqual(serialize(nodes), '  - [ ] Child\n')
 
-    def test_blank_line_after_taskblock(self):
-        b = _block('- [ ] Existing task')
+    def test_subtask_no_blank_after_preceding_content(self):
+        b = _block('- [ ] Parent')
         nodes = [b]
-        insert_task(nodes, self._task('Second task'))
-        self.assertEqual(serialize(nodes), '- [ ] Existing task\n\n- [ ] Second task\n')
+        insert_task(nodes, self._task('Child', indent='  '))
+        self.assertEqual(serialize(nodes), '- [ ] Parent\n  - [ ] Child\n')
 
-    def test_blank_goes_into_preceding_taskblock_nodes(self):
-        b = _block('- [ ] Existing task')
-        nodes = [b]
-        insert_task(nodes, self._task('Second task'))
-        # blank line belongs to the preceding TaskBlock, not top-level
-        self.assertEqual(len(nodes), 2)
-        self.assertIsInstance(nodes[1], TaskBlock)
-        self.assertIsInstance(b.nodes[-1], RawLine)
-        self.assertEqual(b.nodes[-1].raw, '\n')
-
-    def test_blank_line_after_rawline(self):
-        nodes = [RawLine('# Heading\n')]
-        insert_task(nodes, self._task())
-        self.assertEqual(serialize(nodes), '# Heading\n\n- [ ] New task\n')
-
-    def test_blank_appended_to_toplevel_after_rawline(self):
-        raw = RawLine('# Heading\n')
-        nodes = [raw]
-        insert_task(nodes, self._task())
-        self.assertEqual(len(nodes), 3)  # raw, blank, task
+    # ── return value and field ranges ─────────────────────────────────────────
 
     def test_returns_taskblock(self):
         nodes = []
@@ -267,12 +268,6 @@ class TestInsertTask(unittest.TestCase):
         block = insert_task(nodes, task)
         self.assertEqual(block.header, '- [ ] 09:00-10:00 Meeting\n')
         self.assertIsNotNone(block.time_range)
-
-    def test_roundtrip_two_inserts(self):
-        nodes = []
-        insert_task(nodes, self._task('First'))
-        insert_task(nodes, self._task('Second'))
-        self.assertEqual(serialize(nodes), '- [ ] First\n\n- [ ] Second\n')
 
 
 if __name__ == '__main__':

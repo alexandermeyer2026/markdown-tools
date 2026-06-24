@@ -79,13 +79,8 @@ def set_priority(block: TaskBlock, new_priority: Optional[str]) -> str:
 
 
 def insert_task(nodes: list, task: Task) -> TaskBlock:
-    """Append task as a new TaskBlock at the end of nodes, preceded by a blank line."""
-    if nodes:
-        last = nodes[-1]
-        if isinstance(last, TaskBlock):
-            last.nodes.append(RawLine('\n'))
-        else:
-            nodes.append(RawLine('\n'))
+    """Append task as a new TaskBlock. Top-level tasks get a trailing blank line; subtasks get none."""
+    is_subtask = bool(task.indent)
 
     header = task.to_line() + '\n'
     ranges = compute_field_ranges(header) or (None, None, None, None)
@@ -97,6 +92,7 @@ def insert_task(nodes: list, task: Task) -> TaskBlock:
         time_range=time_r,
         priority_range=pri_r,
         title_range=title_r,
+        nodes=[] if is_subtask else [RawLine('\n')],
     )
     nodes.append(block)
     return block
