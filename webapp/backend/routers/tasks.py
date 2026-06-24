@@ -7,10 +7,12 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from models.file import RawLine, TaskBlock, parse, all_tasks
-from models.task import Task, status_char_map
+from models.file import File, RawLine, TaskBlock, all_tasks
+from models.task import Task, TaskTime, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter
+from parser.operations import insert_task
+import parser.operations as ops
 
 router = APIRouter()
 
@@ -56,10 +58,10 @@ class UpdateTaskRequest(BaseModel):
 def get_tasks(date: str, _user=Depends(get_current_user)):
     path = resolve_journal_file(date)
     try:
-        nodes = parse(str(path))
+        file = File(str(path))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse file: {e}")
-    top_level_blocks = [n for n in nodes if isinstance(n, TaskBlock)]
+    top_level_blocks = [n for n in file.nodes if isinstance(n, TaskBlock)]
     return {"date": date, "tasks": [_task_to_dict(b) for b in top_level_blocks]}
 
 
@@ -69,26 +71,20 @@ def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_use
     if req.status not in char_map:
         raise HTTPException(status_code=400, detail=f"Invalid status")
 
-    path = resolve_journal_file(date)
-    BackupManager.backup(str(path), str(journal_dir()))
-
-    time_part = ""
-    if req.time_start:
-        time_part = req.time_start
-        if req.time_end:
-            time_part += f"-{req.time_end}"
-        time_part += " "
-
     if "\n" in req.title or "\r" in req.title:
         raise HTTPException(status_code=400, detail="Title cannot contain newlines")
 
-    char = char_map[req.status]
-    line = f"- [{char}] {time_part}{req.title}\n"
+    path = resolve_journal_file(date)
+    BackupManager.backup(str(path), str(journal_dir()))
 
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += "\n"
-    FileWriter.write_atomic(str(path), lines + [line])
+    time = None
+    if req.time_start:
+        time = TaskTime(start=req.time_start, end=req.time_end if req.time_end else None)
+
+    task = Task(title=req.title, status=req.status, time=time, line_number=-1, indent="")
+    file = File(str(path))
+    insert_task(file.nodes, task)
+    FileWriter.write_nodes(str(path), file.nodes)
 
     return {"message": "created"}
 
@@ -108,17 +104,18 @@ def update_task_status(
         )
 
     path = resolve_journal_file(date)
-    nodes = parse(str(path))
-    task = next((t for t in all_tasks(nodes) if t.line_number == line_number), None)
+    file = File(str(path))
+    task = next((t for t in all_tasks(file.nodes) if t.line_number == line_number), None)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found at that line")
 
     BackupManager.backup(str(path), str(journal_dir()))
 
-    task.status = req.status
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    lines[line_number - 1] = task.to_line() + "\n"
-    FileWriter.write_atomic(str(path), lines)
+    found_block = _find_block(file.nodes, task)
+    if found_block:
+        ops.set_status(found_block, req.status)
+    else:
+        task.status = req.status
+    FileWriter.write_nodes(str(path), file.nodes)
 
-    found_block = _find_block(nodes, task)
     return {"message": "updated", "task": _task_to_dict(found_block) if found_block else {"title": task.title, "status": task.status}}

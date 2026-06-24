@@ -266,12 +266,12 @@ class TestSortTimedTasks(unittest.TestCase):
         )
         self.assertEqual(self._sort(content), content)
 
-class TestWriteAtomic(unittest.TestCase):
+class TestWriteLines(unittest.TestCase):
 
     def test_trailing_newline_added_when_missing(self):
         path = write_temp('')
         try:
-            FileWriter.write_atomic(path, ['- [ ] Task'])
+            FileWriter.write_lines(path, ['- [ ] Task'])
             self.assertEqual(read_file(path), '- [ ] Task\n')
         finally:
             os.unlink(path)
@@ -279,7 +279,7 @@ class TestWriteAtomic(unittest.TestCase):
     def test_trailing_newline_preserved_when_present(self):
         path = write_temp('')
         try:
-            FileWriter.write_atomic(path, ['- [ ] Task\n'])
+            FileWriter.write_lines(path, ['- [ ] Task\n'])
             self.assertEqual(read_file(path), '- [ ] Task\n')
         finally:
             os.unlink(path)
@@ -287,7 +287,7 @@ class TestWriteAtomic(unittest.TestCase):
     def test_empty_lines_writes_empty_file(self):
         path = write_temp('existing content\n')
         try:
-            FileWriter.write_atomic(path, [])
+            FileWriter.write_lines(path, [])
             self.assertEqual(read_file(path), '')
         finally:
             os.unlink(path)

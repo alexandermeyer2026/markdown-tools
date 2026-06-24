@@ -3,7 +3,9 @@ import os
 
 from models import Task
 from os_utils import FileFinder
-from models.file import RawLine, TaskBlock, compute_field_ranges, parse, serialize
+import copy
+
+from models.file import RawLine, TaskBlock, compute_field_ranges, parse
 import parser.operations as ops
 
 
@@ -24,7 +26,7 @@ class DayCache:
         self.nodes = nodes
         self._version = 0
         self._saved_version = 0
-        self._cp_content = None
+        self._cp_nodes = None
         self._cp_saved_version = 0
         self._cp_version = 0
 
@@ -46,23 +48,22 @@ class DayCache:
 
     def checkpoint(self) -> None:
         """Snapshot current state; restore_checkpoint() returns here."""
-        self._cp_content = serialize(self.nodes)
+        self._cp_nodes = copy.deepcopy(self.nodes)
         self._cp_saved_version = self._saved_version
         self._cp_version = self._version
 
     def update_checkpoint(self) -> None:
         """Advance checkpoint after a ctrl+s save so discard returns to saved state."""
-        self._cp_content = serialize(self.nodes)
+        self._cp_nodes = copy.deepcopy(self.nodes)
         self._cp_saved_version = self._saved_version
         self._cp_version = self._version
 
     def restore_checkpoint(self) -> None:
         """Revert to the state when checkpoint() was last called."""
-        if self._cp_content is None:
+        if self._cp_nodes is None:
             self.discard()
             return
-        from models.file import parse_lines
-        self.nodes = parse_lines(self._cp_content.splitlines(keepends=True))
+        self.nodes = copy.deepcopy(self._cp_nodes)
         self._saved_version = self._cp_saved_version
         self._version = self._cp_version
 
@@ -100,7 +101,6 @@ class DayCache:
 
     def update_task(self, task, title: str, status: str, time, body, subtasks) -> None:
         from .weekly import sort_timed_nodes, task_to_block
-        before = serialize(self.nodes)
         block = self.find_block(task)
         if block is None:
             task.title = title
@@ -125,8 +125,7 @@ class DayCache:
                 rebuilt.nodes.pop()
             block.nodes[:] = rebuilt.nodes + trailing
         sort_timed_nodes(self.nodes)
-        if serialize(self.nodes) != before:
-            self._bump()
+        self._bump()
 
     def add_block(self, block: TaskBlock) -> None:
         from .weekly import append_block

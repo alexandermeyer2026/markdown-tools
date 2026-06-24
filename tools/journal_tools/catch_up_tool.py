@@ -131,4 +131,4 @@ class CatchUpTool:
                 else:
                     print(f"Warning: Line {line_num} in {file_path} has changed. Skipped.")
 
-        FileWriter.write_atomic(file_path, lines)
+        FileWriter.write_lines(file_path, lines)
