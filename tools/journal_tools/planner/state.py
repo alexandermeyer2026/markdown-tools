@@ -6,7 +6,6 @@ from os_utils import FileFinder
 import copy
 
 from models.file import TaskBlock, compute_field_ranges, parse
-import parser.operations as ops
 
 
 def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
@@ -82,7 +81,7 @@ class DayCache:
             return
         block = self.find_block(task)
         if block:
-            ops.set_status(block, status)
+            block.set_status(status)
         else:
             task.status = status
         self._bump()
@@ -93,7 +92,7 @@ class DayCache:
             return
         block = self.find_block(task)
         if block:
-            ops.set_time(block, time)
+            block.set_time(time)
         else:
             task.time = time
         sort_timed_nodes(self.nodes)
@@ -107,10 +106,10 @@ class DayCache:
             task.status = status
             task.time = time
         else:
-            ops.set_status(block, status)
-            ops.set_time(block, time)
-            ops.set_title(block, title)
-            ops.set_body_and_subtasks(block, body, subtasks)
+            block.set_status(status)
+            block.set_time(time)
+            block.set_title(title)
+            block.set_body_and_subtasks(body, subtasks)
         sort_timed_nodes(self.nodes)
         self._bump()
 

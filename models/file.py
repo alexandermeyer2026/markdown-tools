@@ -4,8 +4,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, Union
 
-from config import get_task_config
-from models.task import Task, TaskTime
+from config import get_task_config, get_indent_step
+from models.task import Task, TaskTime, status_char_map
 
 
 _TAG_LINE_RE = re.compile(r'^\s*(#[\w-]+)(\s+#[\w-]+)*\s*$')
@@ -29,13 +29,104 @@ class RawLine:
 @dataclass
 class TaskBlock:
     task: Task
-    header: str       # exact header line; splice surgically via operations.py
+    header: str       # exact header line; mutate only via set_* methods
     nodes: list = field(default_factory=list)  # list[Node], body in document order
     tag_node: Optional[RawLine] = field(default=None)  # RawLine holding the tag line, if any
     checkbox_range: Optional[FieldRange] = field(default=None)
     time_range: Optional[FieldRange] = field(default=None)
     priority_range: Optional[FieldRange] = field(default=None)
     title_range: Optional[FieldRange] = field(default=None)
+
+    # ── Surgical field ops ────────────────────────────────────────────────────
+
+    def _refresh_ranges(self) -> None:
+        result = compute_field_ranges(self.header)
+        if result is not None:
+            self.checkbox_range, self.time_range, self.priority_range, self.title_range = result
+
+    def set_status(self, status: str) -> None:
+        char = status_char_map().get(status, '?')
+        r = self.checkbox_range
+        self.header = self.header[:r.start] + char + self.header[r.end:]
+        self.task.status = status
+        self.checkbox_range = FieldRange(r.start, r.start + len(char))
+
+    def set_time(self, new_time: Optional[TaskTime]) -> None:
+        new_text = new_time.to_str() + ' ' if new_time is not None else ''
+        if self.time_range is not None:
+            r = self.time_range
+            self.header = self.header[:r.start] + new_text + self.header[r.end:]
+        elif new_time is not None:
+            insert_at = (self.priority_range.start if self.priority_range is not None
+                         else self.title_range.start)
+            self.header = self.header[:insert_at] + new_text + self.header[insert_at:]
+        self.task.time = new_time
+        self._refresh_ranges()
+
+    def set_title(self, new_title: str) -> None:
+        r = self.title_range
+        self.header = self.header[:r.start] + new_title + self.header[r.end:]
+        self.task.title = new_title
+        self.title_range = FieldRange(r.start, r.start + len(new_title))
+
+    def set_priority(self, new_priority: Optional[str]) -> None:
+        if self.priority_range is not None:
+            pri_start = self.priority_range.start
+            pri_end = self.priority_range.end
+            title_start = self.title_range.start
+            if new_priority is not None:
+                self.header = self.header[:pri_start] + new_priority + self.header[pri_end:]
+            else:
+                self.header = self.header[:pri_start] + self.header[title_start:]
+        elif new_priority is not None:
+            insert_at = self.title_range.start
+            self.header = self.header[:insert_at] + new_priority + ' ' + self.header[insert_at:]
+        self.task.priority = new_priority
+        self._refresh_ranges()
+
+    def set_body_and_subtasks(self, body: str | None, subtasks: list) -> None:
+        """Replace body lines and subtask children; preserve trailing blank lines."""
+        body_indent = (self.task.indent or '') + get_indent_step()
+        trailing = []
+        for node in reversed(self.nodes):
+            if isinstance(node, RawLine) and not node.raw.strip():
+                trailing.insert(0, node)
+            else:
+                break
+        body_nodes = []
+        if body:
+            for line in body.split('\n'):
+                stripped = line.strip()
+                body_nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
+        self.nodes[:] = body_nodes + list(subtasks) + trailing
+
+    @classmethod
+    def from_task(cls, task: Task, body: str | None = None,
+                  subtask_blocks: list | None = None) -> TaskBlock:
+        """Build a new TaskBlock from a Task with optional body text and child blocks."""
+        indent_step = get_indent_step()
+        nodes = []
+        if body:
+            body_indent = (task.indent or '') + indent_step
+            for line in body.split('\n'):
+                stripped = line.strip()
+                nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
+        for child_block in (subtask_blocks or []):
+            expected_indent = (task.indent or '') + indent_step
+            if child_block.task.indent != expected_indent:
+                old_indent = child_block.task.indent or ''
+                child_block.header = expected_indent + child_block.header[len(old_indent):]
+                child_block.task.indent = expected_indent
+                child_block._refresh_ranges()
+            nodes.append(child_block)
+        header = task.to_line() + '\n'
+        ranges = compute_field_ranges(header) or (None, None, None, None)
+        cbx_r, time_r, pri_r, title_r = ranges
+        return cls(task=task, header=header, nodes=nodes,
+                   checkbox_range=cbx_r, time_range=time_r,
+                   priority_range=pri_r, title_range=title_r)
+
+    # ── Tags ──────────────────────────────────────────────────────────────────
 
     def refresh_tags(self) -> None:
         """Sync task.tags back to the body. Call after mutating task.tags."""
@@ -225,3 +316,12 @@ class File:
             self.nodes: list[Node] = parse_lines(lines)
         except FileNotFoundError:
             self.nodes = []
+
+
+def insert_task(nodes: list, task: Task) -> TaskBlock:
+    """Append task as a new TaskBlock. Top-level tasks get a trailing blank line; subtasks get none."""
+    block = TaskBlock.from_task(task)
+    if not task.indent:
+        block.nodes.append(RawLine('\n'))
+    nodes.append(block)
+    return block

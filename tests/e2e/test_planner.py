@@ -3,8 +3,7 @@ import os
 from textual.widgets import Input, Select, TextArea
 
 from models.task import Task
-from models.file import TaskBlock, parse, serialize
-from parser.operations import insert_task
+from models.file import TaskBlock, parse, serialize, insert_task
 from tools.journal_tools.planner.save_dialog import SaveDialog
 from tools.journal_tools.planner.task_form_screen import TaskFormScreen
 

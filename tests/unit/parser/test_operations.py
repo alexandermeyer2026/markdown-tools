@@ -5,8 +5,7 @@ import tempfile
 import unittest
 
 from models.task import Task, TaskTime
-from models.file import RawLine, TaskBlock, parse, serialize
-from parser.operations import insert_task, set_priority, set_status, set_time, set_title
+from models.file import RawLine, TaskBlock, parse, serialize, insert_task
 
 
 def _block(line: str):
@@ -25,32 +24,32 @@ class TestSetStatus(unittest.TestCase):
 
     def test_marks_done(self):
         b = _block('- [ ] Buy milk')
-        set_status(b, 'done')
+        b.set_status('done')
         self.assertEqual(b.header, '- [x] Buy milk\n')
 
     def test_marks_todo(self):
         b = _block('- [x] Buy milk')
-        set_status(b, 'todo')
+        b.set_status('todo')
         self.assertEqual(b.header, '- [ ] Buy milk\n')
 
     def test_updates_task_status(self):
         b = _block('- [ ] Buy milk')
-        set_status(b, 'done')
+        b.set_status('done')
         self.assertEqual(b.task.status, 'done')
 
     def test_preserves_time_and_title(self):
         b = _block('- [ ] 09:00-10:00 Meeting')
-        set_status(b, 'done')
+        b.set_status('done')
         self.assertEqual(b.header, '- [x] 09:00-10:00 Meeting\n')
 
     def test_preserves_priority(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_status(b, 'done')
+        b.set_status('done')
         self.assertEqual(b.header, '- [x] !!! Buy groceries\n')
 
     def test_checkbox_range_updated(self):
         b = _block('- [ ] Buy milk')
-        set_status(b, 'done')
+        b.set_status('done')
         self.assertEqual(b.header[b.checkbox_range.start:b.checkbox_range.end], 'x')
 
 
@@ -61,50 +60,50 @@ class TestSetTime(unittest.TestCase):
 
     def test_replaces_existing_time(self):
         b = _block('- [ ] 09:00-10:00 Meeting')
-        set_time(b, TaskTime(start='11:00', end='12:00'))
+        b.set_time(TaskTime(start='11:00', end='12:00'))
         self.assertEqual(b.header, '- [ ] 11:00-12:00 Meeting\n')
 
     def test_removes_time(self):
         b = _block('- [ ] 09:00-10:00 Meeting')
-        set_time(b, None)
+        b.set_time(None)
         self.assertEqual(b.header, '- [ ] Meeting\n')
 
     def test_inserts_time_where_none_existed(self):
         b = _block('- [ ] Meeting')
-        set_time(b, TaskTime(start='09:00', end='10:00'))
+        b.set_time(TaskTime(start='09:00', end='10:00'))
         self.assertEqual(b.header, '- [ ] 09:00-10:00 Meeting\n')
 
     def test_inserts_time_before_priority(self):
         b = _block('- [ ] !!! Meeting')
-        set_time(b, TaskTime(start='09:00'))
+        b.set_time(TaskTime(start='09:00'))
         self.assertEqual(b.header, '- [ ] 09:00 !!! Meeting\n')
 
     def test_updates_task_time(self):
         b = _block('- [ ] 09:00 Meeting')
         new_time = TaskTime(start='11:00')
-        set_time(b, new_time)
+        b.set_time(new_time)
         self.assertEqual(b.task.time, new_time)
 
     def test_clears_task_time(self):
         b = _block('- [ ] 09:00 Meeting')
-        set_time(b, None)
+        b.set_time(None)
         self.assertIsNone(b.task.time)
 
     def test_time_range_updated(self):
         b = _block('- [ ] 09:00-10:00 Meeting')
-        set_time(b, TaskTime(start='11:00', end='12:00'))
+        b.set_time(TaskTime(start='11:00', end='12:00'))
         sliced = b.header.rstrip('\n')[b.time_range.start:b.time_range.end]
         self.assertEqual(sliced, '11:00-12:00 ')
 
     def test_time_range_none_after_removal(self):
         b = _block('- [ ] 09:00 Meeting')
-        set_time(b, None)
+        b.set_time(None)
         self.assertIsNone(b.time_range)
 
     def test_no_op_when_both_none(self):
         b = _block('- [ ] Meeting')
         original = b.header
-        set_time(b, None)
+        b.set_time(None)
         self.assertEqual(b.header, original)
 
 
@@ -115,27 +114,27 @@ class TestSetTitle(unittest.TestCase):
 
     def test_replaces_title(self):
         b = _block('- [ ] Buy milk')
-        set_title(b, 'Buy oat milk')
+        b.set_title('Buy oat milk')
         self.assertEqual(b.header, '- [ ] Buy oat milk\n')
 
     def test_updates_task_title(self):
         b = _block('- [ ] Buy milk')
-        set_title(b, 'Buy oat milk')
+        b.set_title('Buy oat milk')
         self.assertEqual(b.task.title, 'Buy oat milk')
 
     def test_preserves_time(self):
         b = _block('- [ ] 09:00 Meeting')
-        set_title(b, 'Standup')
+        b.set_title('Standup')
         self.assertEqual(b.header, '- [ ] 09:00 Standup\n')
 
     def test_preserves_priority(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_title(b, 'Buy milk')
+        b.set_title('Buy milk')
         self.assertEqual(b.header, '- [ ] !!! Buy milk\n')
 
     def test_title_range_updated(self):
         b = _block('- [ ] Buy milk')
-        set_title(b, 'Buy oat milk')
+        b.set_title('Buy oat milk')
         sliced = b.header.rstrip('\n')[b.title_range.start:b.title_range.end]
         self.assertEqual(sliced, 'Buy oat milk')
 
@@ -147,54 +146,54 @@ class TestSetPriority(unittest.TestCase):
 
     def test_replaces_priority(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_priority(b, '!!')
+        b.set_priority('!!')
         self.assertEqual(b.header, '- [ ] !! Buy groceries\n')
 
     def test_removes_priority(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_priority(b, None)
+        b.set_priority(None)
         self.assertEqual(b.header, '- [ ] Buy groceries\n')
 
     def test_inserts_priority(self):
         b = _block('- [ ] Buy groceries')
-        set_priority(b, '!!!')
+        b.set_priority('!!!')
         self.assertEqual(b.header, '- [ ] !!! Buy groceries\n')
 
     def test_updates_task_priority(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_priority(b, '!!')
+        b.set_priority('!!')
         self.assertEqual(b.task.priority, '!!')
 
     def test_clears_task_priority(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_priority(b, None)
+        b.set_priority(None)
         self.assertIsNone(b.task.priority)
 
     def test_preserves_time(self):
         b = _block('- [ ] 10:00 !!! Meeting')
-        set_priority(b, '!!')
+        b.set_priority('!!')
         self.assertEqual(b.header, '- [ ] 10:00 !! Meeting\n')
 
     def test_removes_priority_with_time(self):
         b = _block('- [ ] 10:00 !!! Meeting')
-        set_priority(b, None)
+        b.set_priority(None)
         self.assertEqual(b.header, '- [ ] 10:00 Meeting\n')
 
     def test_no_op_when_both_none(self):
         b = _block('- [ ] Buy groceries')
         original = b.header
-        set_priority(b, None)
+        b.set_priority(None)
         self.assertEqual(b.header, original)
 
     def test_priority_range_updated(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_priority(b, '!!')
+        b.set_priority('!!')
         sliced = b.header.rstrip('\n')[b.priority_range.start:b.priority_range.end]
         self.assertEqual(sliced, '!!')
 
     def test_priority_range_none_after_removal(self):
         b = _block('- [ ] !!! Buy groceries')
-        set_priority(b, None)
+        b.set_priority(None)
         self.assertIsNone(b.priority_range)
 
 

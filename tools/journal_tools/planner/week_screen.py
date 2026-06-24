@@ -21,7 +21,7 @@ from .weekly import (
     save_cache,
     shift_task,
 )
-from parser.operations import task_to_block
+
 
 _MARGIN = "  "
 
@@ -560,7 +560,7 @@ class WeekGrid(Widget, can_focus=True):
                 line_number=-1,
                 indent="",
             )
-            new_block = task_to_block(new_task, result.body, result.subtasks)
+            new_block = TaskBlock.from_task(new_task, result.body, result.subtasks)
             day_cache = self._planner.days[day_key]
             day_cache.add_block(new_block)
             self.refresh()

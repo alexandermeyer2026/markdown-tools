@@ -239,9 +239,8 @@ class TestPriority(unittest.TestCase):
             self.assertEqual(roundtrip(line), line)
 
     def test_set_status_preserves_priority(self):
-        import parser.operations as ops
         nodes = parse_str('- [ ] !!! Buy groceries\n')
-        ops.set_status(nodes[0], 'done')
+        nodes[0].set_status('done')
         self.assertEqual(nodes[0].header, '- [x] !!! Buy groceries\n')
 
 

@@ -13,7 +13,6 @@ from textual.widgets import Button, Input, Label, Select, TextArea
 
 from config import get_indent_step
 from models import Task, TaskTime
-import parser.operations as ops
 from models.file import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS
 
@@ -120,7 +119,7 @@ class SubtaskList(Widget, can_focus=True):
                 line_number=-1,
                 indent=parent_indent + get_indent_step(),
             )
-            new_block = task_to_block(new_task, result.body, result.subtasks)
+            new_block = TaskBlock.from_task(new_task, result.body, result.subtasks)
             self._children.append(new_block)
             flat = self._flat()
             self.cursor_idx = next(
@@ -142,10 +141,10 @@ class SubtaskList(Widget, can_focus=True):
             new_time = (TaskTime(start=result.time_start,
                                   end=result.time_end if result.time_end else None)
                         if result.time_start else None)
-            ops.set_status(selected_block, result.status)
-            ops.set_time(selected_block, new_time)
-            ops.set_title(selected_block, result.title)
-            ops.set_body_and_subtasks(selected_block, result.body, result.subtasks)
+            selected_block.set_status(result.status)
+            selected_block.set_time(new_time)
+            selected_block.set_title(result.title)
+            selected_block.set_body_and_subtasks(result.body, result.subtasks)
             self.refresh(layout=True)
 
         self.app.push_screen(TaskFormScreen(selected_block), on_result)

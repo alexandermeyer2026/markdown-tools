@@ -7,12 +7,10 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from models.file import File, RawLine, TaskBlock, all_tasks
+from models.file import File, RawLine, TaskBlock, all_tasks, insert_task
 from models.task import Task, TaskTime, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter
-from parser.operations import insert_task
-import parser.operations as ops
 
 router = APIRouter()
 
@@ -113,7 +111,7 @@ def update_task_status(
 
     found_block = _find_block(file.nodes, task)
     if found_block:
-        ops.set_status(found_block, req.status)
+        found_block.set_status(req.status)
     else:
         task.status = req.status
     FileWriter.write_nodes(str(path), file.nodes)

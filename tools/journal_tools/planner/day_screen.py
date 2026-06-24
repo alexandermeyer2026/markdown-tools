@@ -18,7 +18,7 @@ from tools.journal_tools.rendering import (
 from .daily import save
 from .state import DayCache, PlannerState
 from .utils import flatten_tasks
-from parser.operations import task_to_block
+
 
 _STEP = 0.25          # hours per slot (15 min)
 _STEP_M = int(_STEP * 60)
@@ -504,7 +504,7 @@ class DayGrid(Widget, can_focus=True):
                 line_number=-1,
                 indent="",
             )
-            block = task_to_block(new_task, result.body, result.subtasks)
+            block = TaskBlock.from_task(new_task, result.body, result.subtasks)
             day = self._day()
             day.add_block(block)
             nav = self._navigable()

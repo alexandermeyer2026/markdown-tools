@@ -11,7 +11,7 @@ from models.file import RawLine, TaskBlock, serialize
 from tools.journal_tools.planner import DayCache
 from tools.journal_tools.planner.state import PlannerState
 from tools.journal_tools.planner.weekly import cache_has_changes
-from parser.operations import task_to_block
+from models.file import TaskBlock
 
 
 @pytest.mark.integration
@@ -26,14 +26,14 @@ class TestWeekCacheChanges(unittest.TestCase):
     def test_no_changes_returns_false(self):
         child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
-        child_block = task_to_block(child)
-        parent_block = task_to_block(parent, subtask_blocks=[child_block])
+        child_block = TaskBlock.from_task(child)
+        parent_block = TaskBlock.from_task(parent, subtask_blocks=[child_block])
         cache = self._make_cache([parent_block])
         self.assertFalse(cache_has_changes(cache))
 
     def test_parent_status_change_detected(self):
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
-        parent_block = task_to_block(parent)
+        parent_block = TaskBlock.from_task(parent)
         cache = self._make_cache([parent_block])
         cache['2024-01-15'].set_status(parent, 'done')
         self.assertTrue(cache_has_changes(cache))
@@ -41,24 +41,24 @@ class TestWeekCacheChanges(unittest.TestCase):
     def test_subtask_status_change_detected(self):
         child = Task(title='Sub', status='todo', time=None, line_number=2, indent='  ')
         parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
-        child_block = task_to_block(child)
-        parent_block = task_to_block(parent, subtask_blocks=[child_block])
+        child_block = TaskBlock.from_task(child)
+        parent_block = TaskBlock.from_task(parent, subtask_blocks=[child_block])
         cache = self._make_cache([parent_block])
         cache['2024-01-15'].set_status(child, 'done')
         self.assertTrue(cache_has_changes(cache))
 
     def test_add_block_no_separator_when_no_trailing_blank(self):
-        existing = task_to_block(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
+        existing = TaskBlock.from_task(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
         day = DayCache(file_path=None, nodes=[existing])
-        new_block = task_to_block(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
+        new_block = TaskBlock.from_task(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
         day.add_block(new_block)
         self.assertEqual(serialize(day.nodes), '- [ ] Existing\n- [ ] New\n')
 
     def test_add_block_no_separator_when_trailing_blank_already_present(self):
-        existing = task_to_block(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
+        existing = TaskBlock.from_task(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
         existing.nodes.append(RawLine('\n'))
         day = DayCache(file_path=None, nodes=[existing])
-        new_block = task_to_block(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
+        new_block = TaskBlock.from_task(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
         day.add_block(new_block)
         self.assertEqual(serialize(day.nodes), '- [ ] Existing\n\n- [ ] New\n')
 
@@ -107,7 +107,7 @@ class TestPlannerState(unittest.TestCase):
         key = self.date.isoformat()
         state.load_day(self.date)
         new = Task(title='Ephemeral', status='todo', time=None, line_number=-1, indent='')
-        state.days[key].add_block(task_to_block(new))
+        state.days[key].add_block(TaskBlock.from_task(new))
         self.assertEqual(len(state.days[key].task_list), 3)
         state.reload_day_by_key(key)
         self.assertEqual(len(state.days[key].task_list), 2)
