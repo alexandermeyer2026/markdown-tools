@@ -5,7 +5,7 @@ from models import Task
 from os_utils import FileFinder
 import copy
 
-from models.file import RawLine, TaskBlock, compute_field_ranges, parse
+from models.file import TaskBlock, compute_field_ranges, parse
 import parser.operations as ops
 
 
@@ -100,7 +100,7 @@ class DayCache:
         self._bump()
 
     def update_task(self, task, title: str, status: str, time, body, subtasks) -> None:
-        from .weekly import sort_timed_nodes, task_to_block
+        from .weekly import sort_timed_nodes
         block = self.find_block(task)
         if block is None:
             task.title = title
@@ -110,20 +110,7 @@ class DayCache:
             ops.set_status(block, status)
             ops.set_time(block, time)
             ops.set_title(block, title)
-            # Trailing blank RawLines are inter-task gaps owned by this block;
-            # they are not body content and must survive an edit unchanged.
-            trailing = []
-            for node in reversed(block.nodes):
-                if isinstance(node, RawLine) and not node.raw.strip():
-                    trailing.insert(0, node)
-                else:
-                    break
-            rebuilt = task_to_block(task, body, subtasks)
-            # task_to_block may emit a trailing blank when body ends with \n;
-            # remove it so we restore exactly the original inter-task spacing.
-            while rebuilt.nodes and isinstance(rebuilt.nodes[-1], RawLine) and not rebuilt.nodes[-1].raw.strip():
-                rebuilt.nodes.pop()
-            block.nodes[:] = rebuilt.nodes + trailing
+            ops.set_body_and_subtasks(block, body, subtasks)
         sort_timed_nodes(self.nodes)
         self._bump()
 

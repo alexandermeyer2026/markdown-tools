@@ -7,7 +7,7 @@ from config import get_indent_step
 from models import Task, TaskTime
 from os_utils import BackupManager, FileFinder
 from os_utils.file_writer import FileWriter
-from models.file import RawLine, TaskBlock, parse
+from models.file import RawLine, TaskBlock, compute_field_ranges, parse
 from tools.journal_tools.cli_utils import parse_date_flags
 
 
@@ -56,8 +56,12 @@ def _row_to_task_block(row: dict) -> TaskBlock:
         priority=row['Priority'].strip() if row['Priority'].strip() else None,
         tags=tags,
     )
-    block = TaskBlock(task=task, header='')
-    block.refresh_header()
+    header = task.to_line() + '\n'
+    ranges = compute_field_ranges(header) or (None, None, None, None)
+    cbx_r, time_r, pri_r, title_r = ranges
+    block = TaskBlock(task=task, header=header,
+                      checkbox_range=cbx_r, time_range=time_r,
+                      priority_range=pri_r, title_range=title_r)
     if tags:
         block.refresh_tags()
     return block

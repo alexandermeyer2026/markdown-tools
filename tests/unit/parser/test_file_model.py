@@ -193,36 +193,6 @@ class TestStructure(unittest.TestCase):
         self.assertEqual(t.time.end, '10:00')
 
 
-# ── refresh_header ────────────────────────────────────────────────────────────
-
-@pytest.mark.integration
-class TestRefreshHeader(unittest.TestCase):
-
-    def test_refresh_updates_header(self):
-        nodes = parse_str('- [ ] Task\n')
-        block = nodes[0]
-        block.task.status = 'done'
-        block.refresh_header()
-        self.assertEqual(block.header, '- [x] Task\n')
-
-    def test_serialize_after_refresh(self):
-        nodes = parse_str('- [ ] Task\n')
-        nodes[0].task.status = 'done'
-        nodes[0].refresh_header()
-        self.assertEqual(serialize(nodes), '- [x] Task\n')
-
-    def test_refresh_preserves_body(self):
-        nodes = parse_str('- [ ] Task\n  Note\n')
-        nodes[0].task.status = 'done'
-        nodes[0].refresh_header()
-        self.assertEqual(serialize(nodes), '- [x] Task\n  Note\n')
-
-    def test_unmodified_header_unchanged(self):
-        original = '- [ ] Task\n'
-        nodes = parse_str(original)
-        # no refresh_header called — header must still be the original line
-        self.assertEqual(nodes[0].header, original)
-
 
 # ── Priority ─────────────────────────────────────────────────────────────────
 
@@ -268,10 +238,10 @@ class TestPriority(unittest.TestCase):
         ]:
             self.assertEqual(roundtrip(line), line)
 
-    def test_refresh_header_preserves_priority(self):
+    def test_set_status_preserves_priority(self):
+        import parser.operations as ops
         nodes = parse_str('- [ ] !!! Buy groceries\n')
-        nodes[0].task.status = 'done'
-        nodes[0].refresh_header()
+        ops.set_status(nodes[0], 'done')
         self.assertEqual(nodes[0].header, '- [x] !!! Buy groceries\n')
 
 

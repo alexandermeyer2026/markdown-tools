@@ -20,8 +20,8 @@ from .weekly import (
     cache_has_changes,
     save_cache,
     shift_task,
-    task_to_block,
 )
+from parser.operations import task_to_block
 
 _MARGIN = "  "
 

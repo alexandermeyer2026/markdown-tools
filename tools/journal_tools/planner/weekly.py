@@ -56,10 +56,14 @@ def _find_path_for_task(nodes: list, task: Task) -> 'tuple[TaskBlock, list[tuple
 def _reindent_block(block: TaskBlock, new_indent: str) -> None:
     """Recursively update task.indent and RawLine body indents for a block tree."""
     indent_step = get_indent_step()
-    old_body_indent = block.task.indent + indent_step
+    old_indent = block.task.indent
+    old_body_indent = old_indent + indent_step
     new_body_indent = new_indent + indent_step
+    block.header = new_indent + block.header[len(old_indent):]
     block.task.indent = new_indent
-    block.refresh_header()
+    result = compute_field_ranges(block.header)
+    if result is not None:
+        block.checkbox_range, block.time_range, block.priority_range, block.title_range = result
     for node in block.nodes:
         if isinstance(node, RawLine) and node.raw.strip():
             if node.raw.startswith(old_body_indent):
@@ -160,27 +164,6 @@ def sort_timed_nodes(nodes: list) -> None:
     for pos, block in zip(block_positions, sorted_blocks):
         nodes[pos] = block
 
-
-def task_to_block(task: Task, body: str | None = None, subtask_blocks: list | None = None) -> TaskBlock:
-    """Build a TaskBlock from a Task, an optional body string, and optional child blocks."""
-    indent_step = get_indent_step()
-    nodes = []
-    if body:
-        body_indent = (task.indent or '') + indent_step
-        for line in body.split('\n'):
-            stripped = line.strip()
-            nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
-    for child_block in (subtask_blocks or []):
-        if not child_block.task.indent:
-            child_block.task.indent = (task.indent or '') + indent_step
-        child_block.refresh_header()
-        nodes.append(child_block)
-    header = task.to_line() + '\n'
-    ranges = compute_field_ranges(header) or (None, None, None, None)
-    cbx_r, time_r, pri_r, title_r = ranges
-    return TaskBlock(task=task, header=header, nodes=nodes,
-                     checkbox_range=cbx_r, time_range=time_r,
-                     priority_range=pri_r, title_range=title_r)
 
 
 def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:

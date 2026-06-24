@@ -1,6 +1,6 @@
 import os
 
-from models import Task, get_minutes
+from models import Task
 from models.file import Node, serialize
 
 
@@ -55,55 +55,6 @@ class FileWriter:
         """Cut task from one file and paste it at the end of another."""
         block = FileWriter.cut_task(from_path, task, all_tasks)
         FileWriter.paste_task(to_path, block)
-
-    @staticmethod
-    def sort_timed_tasks(file_path: str, timed_tasks: list[Task], all_tasks: list[Task]) -> None:
-        """Sort timed tasks by start time in place; only tasks sharing the same parent are sorted together."""
-        all_sorted_by_line = sorted(all_tasks, key=lambda t: t.line_number)
-
-        def _parent_key(task: Task) -> int:
-            depth = len(task.indent)
-            idx = next((i for i, t in enumerate(all_sorted_by_line) if t is task), -1)
-            for i in range(idx - 1, -1, -1):
-                if len(all_sorted_by_line[i].indent) < depth:
-                    return id(all_sorted_by_line[i])
-            return -1
-
-        groups: dict[int, list[Task]] = {}
-        for task in timed_tasks:
-            groups.setdefault(_parent_key(task), []).append(task)
-
-        all_sorted = sorted(all_tasks, key=lambda t: t.line_number)
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        def block_range(task: Task) -> tuple[int, int]:
-            start = task.line_number - 1
-            end = task_block_end(task, all_sorted, len(lines))
-            while end > start and lines[end - 1].strip() == '':
-                end -= 1
-            return start, end
-
-        all_assignments = []
-        for group in groups.values():
-            if len(group) < 2:
-                continue
-            ranges = [block_range(t) for t in group]
-            blocks = [lines[s:e] for s, e in ranges]
-            position_order = sorted(range(len(group)), key=lambda i: ranges[i][0])
-            time_order = sorted(range(len(group)), key=lambda i: get_minutes(group[i].time.start))
-            for k in range(len(group)):
-                all_assignments.append((ranges[position_order[k]], blocks[time_order[k]]))
-
-        if not all_assignments:
-            return
-
-        new_lines = list(lines)
-        for (s, e), block in sorted(all_assignments, key=lambda x: x[0][0], reverse=True):
-            new_lines[s:e] = block
-
-        FileWriter._write_atomic(file_path, new_lines)
 
     @staticmethod
     def reindent_block(block: list[str], from_indent: str, to_indent: str) -> list[str]:

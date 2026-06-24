@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from config import get_indent_step
 from models.task import Task, TaskTime, status_char_map
 from models.file import FieldRange, RawLine, TaskBlock, compute_field_ranges
 
@@ -76,6 +77,51 @@ def set_priority(block: TaskBlock, new_priority: Optional[str]) -> str:
     block.task.priority = new_priority
     _refresh_ranges(block)
     return block.header
+
+
+def set_body_and_subtasks(block: TaskBlock, body: str | None, subtasks: list) -> None:
+    """Replace body lines and subtask children; preserve trailing blank lines."""
+    body_indent = (block.task.indent or '') + get_indent_step()
+
+    trailing = []
+    for node in reversed(block.nodes):
+        if isinstance(node, RawLine) and not node.raw.strip():
+            trailing.insert(0, node)
+        else:
+            break
+
+    body_nodes = []
+    if body:
+        for line in body.split('\n'):
+            stripped = line.strip()
+            body_nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
+
+    block.nodes[:] = body_nodes + list(subtasks) + trailing
+
+
+def task_to_block(task: Task, body: str | None = None, subtask_blocks: list | None = None) -> TaskBlock:
+    """Build a new TaskBlock from a Task with optional body text and child blocks."""
+    indent_step = get_indent_step()
+    nodes = []
+    if body:
+        body_indent = (task.indent or '') + indent_step
+        for line in body.split('\n'):
+            stripped = line.strip()
+            nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
+    for child_block in (subtask_blocks or []):
+        expected_indent = (task.indent or '') + indent_step
+        if child_block.task.indent != expected_indent:
+            old_indent = child_block.task.indent or ''
+            child_block.header = expected_indent + child_block.header[len(old_indent):]
+            child_block.task.indent = expected_indent
+            _refresh_ranges(child_block)
+        nodes.append(child_block)
+    header = task.to_line() + '\n'
+    ranges = compute_field_ranges(header) or (None, None, None, None)
+    cbx_r, time_r, pri_r, title_r = ranges
+    return TaskBlock(task=task, header=header, nodes=nodes,
+                     checkbox_range=cbx_r, time_range=time_r,
+                     priority_range=pri_r, title_range=title_r)
 
 
 def insert_task(nodes: list, task: Task) -> TaskBlock:

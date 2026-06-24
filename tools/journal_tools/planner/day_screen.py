@@ -18,7 +18,7 @@ from tools.journal_tools.rendering import (
 from .daily import save
 from .state import DayCache, PlannerState
 from .utils import flatten_tasks
-from .weekly import task_to_block
+from parser.operations import task_to_block
 
 _STEP = 0.25          # hours per slot (15 min)
 _STEP_M = int(_STEP * 60)

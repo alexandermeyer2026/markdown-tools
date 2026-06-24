@@ -29,19 +29,13 @@ class RawLine:
 @dataclass
 class TaskBlock:
     task: Task
-    header: str       # exact header line; call refresh_header() after mutating task
+    header: str       # exact header line; splice surgically via operations.py
     nodes: list = field(default_factory=list)  # list[Node], body in document order
     tag_node: Optional[RawLine] = field(default=None)  # RawLine holding the tag line, if any
     checkbox_range: Optional[FieldRange] = field(default=None)
     time_range: Optional[FieldRange] = field(default=None)
     priority_range: Optional[FieldRange] = field(default=None)
     title_range: Optional[FieldRange] = field(default=None)
-
-    def refresh_header(self) -> None:
-        self.header = self.task.to_line() + '\n'
-        result = compute_field_ranges(self.header)
-        if result is not None:
-            self.checkbox_range, self.time_range, self.priority_range, self.title_range = result
 
     def refresh_tags(self) -> None:
         """Sync task.tags back to the body. Call after mutating task.tags."""

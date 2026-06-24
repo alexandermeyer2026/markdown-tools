@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from models import Task, TaskTime
-from models.file import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock, compute_field_ranges
 from tools.journal_tools.cli_utils import parse_date_flags
 from tools.journal_tools.ics_tool import (
     IcsTool,
@@ -35,9 +35,12 @@ def _make_task(title, status='todo', time=None, indent='', priority=None, tags=N
 
 def _make_block(title, **kwargs):
     task = _make_task(title, **kwargs)
-    block = TaskBlock(task=task, header='')
-    block.refresh_header()
-    return block
+    header = task.to_line() + '\n'
+    ranges = compute_field_ranges(header) or (None, None, None, None)
+    cbx_r, time_r, pri_r, title_r = ranges
+    return TaskBlock(task=task, header=header,
+                     checkbox_range=cbx_r, time_range=time_r,
+                     priority_range=pri_r, title_range=title_r)
 
 
 def _write_journal(tmp_dir, date, content):
