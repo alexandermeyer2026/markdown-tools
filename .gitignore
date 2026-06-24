@@ -17,5 +17,6 @@ id_ed25519
 *.bak
 webapp/nginx/nginx.conf
 graphify-out/
+local/
 .claude/settings*.json
 Makefile
