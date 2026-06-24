@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from parser.file_model import TaskBlock, parse
+from models.file import TaskBlock, parse
 from tools.journal_tools.rendering import get_time_slot
 from tools.journal_tools.timeline_tool import TimelineTool
 

@@ -3,7 +3,7 @@ import unittest
 
 from config import get_indent_step
 from models import Task, TaskTime
-from parser.file_model import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock
 from tools.journal_tools.planner.weekly import (
     move_block_in_nodes,
     shift_tab_task,

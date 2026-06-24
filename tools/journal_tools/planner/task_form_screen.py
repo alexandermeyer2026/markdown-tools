@@ -14,7 +14,7 @@ from textual.widgets import Button, Input, Label, Select, TextArea
 from config import get_indent_step
 from models import Task, TaskTime
 import parser.operations as ops
-from parser.file_model import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS
 from .weekly import task_to_block
 

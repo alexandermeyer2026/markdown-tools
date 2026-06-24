@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from parser.file_model import parse, all_tasks
+from models.file import parse, all_tasks
 from os_utils.file_writer import FileWriter
 
 

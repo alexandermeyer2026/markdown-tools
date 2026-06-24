@@ -3,7 +3,7 @@ import sys
 import uuid
 
 from os_utils import FileFinder
-from parser.file_model import TaskBlock, parse
+from models.file import TaskBlock, parse
 from tools.journal_tools.cli_utils import parse_date_flags
 
 

@@ -4,7 +4,7 @@ import shutil
 
 from models import Task
 from os_utils import FileFinder, resolve_date
-from parser.file_model import TaskBlock, parse
+from models.file import TaskBlock, parse
 from models import get_minutes
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,

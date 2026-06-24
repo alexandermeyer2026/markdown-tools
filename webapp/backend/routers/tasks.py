@@ -7,7 +7,7 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from parser.file_model import RawLine, TaskBlock, parse, all_tasks
+from models.file import RawLine, TaskBlock, parse, all_tasks
 from models.task import Task, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter

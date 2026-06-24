@@ -4,7 +4,7 @@ import os
 import shutil
 
 from os_utils import FileFinder
-from parser.file_model import TaskBlock, parse
+from models.file import TaskBlock, parse
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, BOLD, GRAY, RED, RESET,
     ansi_truncate_pad, body_rows, subtask_rows, get_minutes,

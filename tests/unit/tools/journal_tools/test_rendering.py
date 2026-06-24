@@ -1,7 +1,7 @@
 import unittest
 
 from models import Task, TaskTime
-from parser.file_model import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock
 from tools.journal_tools.rendering import (
     GRAY, RESET, STATUS_COLORS, STATUS_ICONS,
     ansi_truncate_pad, body_rows, get_time_slot, scale_lines, subtask_rows,

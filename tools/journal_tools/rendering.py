@@ -3,7 +3,7 @@ import re
 import textwrap
 
 from models import Task, get_minutes, minutes_to_time
-from parser.file_model import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock
 
 STATUS_ICONS: dict[str, str] = {
     'todo':        '○',

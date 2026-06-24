@@ -1,7 +1,7 @@
 import os
 
 from os_utils import BackupManager, FileWriter
-from parser.file_model import serialize
+from models.file import serialize
 
 
 def has_changes(day) -> bool:

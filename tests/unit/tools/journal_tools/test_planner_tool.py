@@ -7,7 +7,7 @@ import unittest
 import pytest
 
 from models import Task
-from parser.file_model import RawLine, TaskBlock, serialize
+from models.file import RawLine, TaskBlock, serialize
 from tools.journal_tools.planner import DayCache
 from tools.journal_tools.planner.state import PlannerState
 from tools.journal_tools.planner.weekly import cache_has_changes, task_to_block

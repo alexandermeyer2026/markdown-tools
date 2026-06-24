@@ -4,7 +4,7 @@ import unittest
 
 import pytest
 
-from parser.file_model import RawLine, TaskBlock, parse, parse_lines, serialize
+from models.file import RawLine, TaskBlock, parse, parse_lines, serialize
 
 
 def write_temp(content: str) -> str:

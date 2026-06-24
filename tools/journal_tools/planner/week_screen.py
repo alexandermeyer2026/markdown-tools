@@ -10,7 +10,7 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime
-from parser.file_model import TaskBlock
+from models.file import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import PlannerState, WeekState
 from .utils import week_expanded

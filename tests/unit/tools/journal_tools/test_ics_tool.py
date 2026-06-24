@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from models import Task, TaskTime
-from parser.file_model import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock
 from tools.journal_tools.cli_utils import parse_date_flags
 from tools.journal_tools.ics_tool import (
     IcsTool,

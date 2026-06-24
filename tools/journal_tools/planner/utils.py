@@ -1,5 +1,5 @@
 from models import Task, get_minutes
-from parser.file_model import TaskBlock
+from models.file import TaskBlock
 
 
 def flatten_tasks(blocks: list) -> list[Task]:

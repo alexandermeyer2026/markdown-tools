@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from parser.file_model import RawLine, TaskBlock, parse, parse_lines, serialize
+from models.file import RawLine, TaskBlock, parse, parse_lines, serialize
 from models import Task, TaskTime
 from tools.journal_tools.cli_utils import parse_date_flags
 from tools.journal_tools.notion_tool import (

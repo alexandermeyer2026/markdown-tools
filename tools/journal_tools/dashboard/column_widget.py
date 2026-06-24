@@ -8,7 +8,7 @@ from textual.widget import Widget
 from textual.widgets import Rule, Static
 from rich.console import Group
 
-from parser.file_model import TaskBlock
+from models.file import TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from models import get_minutes
 from tools.journal_tools.planner.state import PlannerState

@@ -7,7 +7,7 @@ from config import get_indent_step
 from models import Task, TaskTime
 from os_utils import BackupManager, FileFinder
 from os_utils.file_writer import FileWriter
-from parser.file_model import RawLine, TaskBlock, parse, serialize
+from models.file import RawLine, TaskBlock, parse, serialize
 from tools.journal_tools.cli_utils import parse_date_flags
 
 

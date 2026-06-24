@@ -11,7 +11,7 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime, get_minutes, minutes_to_time
-from parser.file_model import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_STYLES, get_time_slot, scale_lines,
 )

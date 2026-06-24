@@ -10,7 +10,7 @@ from textual.widget import Widget
 from textual.widgets import Rule, Static
 
 from os_utils import FileFinder
-from parser.file_model import TaskBlock, parse
+from models.file import TaskBlock, parse
 from tools.journal_tools.planner.state import PlannerState
 from .calendar_widget import CalendarWidget
 from .column_widget import DayListColumn

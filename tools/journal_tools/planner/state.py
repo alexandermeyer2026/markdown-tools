@@ -3,7 +3,7 @@ import os
 
 from models import Task
 from os_utils import FileFinder
-from parser.file_model import RawLine, TaskBlock, compute_field_ranges, parse, serialize
+from models.file import RawLine, TaskBlock, compute_field_ranges, parse, serialize
 import parser.operations as ops
 
 
@@ -61,7 +61,7 @@ class DayCache:
         if self._cp_content is None:
             self.discard()
             return
-        from parser.file_model import parse_lines
+        from models.file import parse_lines
         self.nodes = parse_lines(self._cp_content.splitlines(keepends=True))
         self._saved_version = self._cp_saved_version
         self._version = self._cp_version

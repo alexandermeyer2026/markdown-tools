@@ -5,7 +5,7 @@ import unittest
 import pytest
 
 from models.task import Task, TaskTime
-from parser.file_model import parse, TaskBlock
+from models.file import parse, TaskBlock
 
 
 def write_temp(content: str) -> str:

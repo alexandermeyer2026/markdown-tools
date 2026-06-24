@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from config import get_task_config
-from models import Task, TaskTime
+from models.task import Task, TaskTime
 
 
 _TAG_LINE_RE = re.compile(r'^\s*(#[\w-]+)(\s+#[\w-]+)*\s*$')
@@ -72,7 +72,6 @@ def serialize(nodes: list[Node]) -> str:
         else:
             parts.append(node.raw)
     return ''.join(parts)
-
 
 
 def all_tasks(nodes: list) -> list[Task]:
@@ -221,3 +220,14 @@ def parse(file_path: str) -> list[Node]:
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     return parse_lines(lines)
+
+
+class File:
+    def __init__(self, path: str):
+        self.path = path
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            self.nodes: list[Node] = parse_lines(lines)
+        except FileNotFoundError:
+            self.nodes = []

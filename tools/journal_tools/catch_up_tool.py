@@ -4,7 +4,7 @@ from difflib import unified_diff
 
 from models import Task
 from os_utils import BackupManager, FileFinder, FileWriter
-from parser.file_model import parse, all_tasks
+from models.file import parse, all_tasks
 from tools.journal_tools.rendering import BOLD, GRAY, GREEN, RED, RESET
 
 

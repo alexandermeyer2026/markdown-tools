@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from models.task import Task, TaskTime
-from parser.file_model import RawLine, TaskBlock, parse, serialize
+from models.file import RawLine, TaskBlock, parse, serialize
 from parser.operations import insert_task, set_priority, set_status, set_time, set_title
 
 

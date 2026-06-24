@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from parser.file_model import parse, all_tasks
+from models.file import parse, all_tasks
 from tools.journal_tools.catch_up_tool import CatchUpTool
 
 

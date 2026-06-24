@@ -6,7 +6,7 @@ from .auth import get_current_user
 from .deps import _DATE_RE, journal_dir, resolve_journal_file
 from tools.journal_tools.ics_tool import _build_ics, _collect_vevent_lines
 from os_utils import FileFinder
-from parser.file_model import parse
+from models.file import parse
 
 router = APIRouter()
 

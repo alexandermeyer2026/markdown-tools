@@ -4,7 +4,7 @@ import os
 from config import get_indent_step
 from models import Task, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter
-from parser.file_model import RawLine, TaskBlock, compute_field_ranges, parse, serialize
+from models.file import RawLine, TaskBlock, compute_field_ranges, parse, serialize
 from .state import DayCache, WeekState
 from .utils import week_expanded
 

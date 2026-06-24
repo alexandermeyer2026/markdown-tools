@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from models.task import Task, TaskTime, status_char_map
-from parser.file_model import FieldRange, RawLine, TaskBlock, compute_field_ranges
+from models.file import FieldRange, RawLine, TaskBlock, compute_field_ranges
 
 
 def _refresh_ranges(block: TaskBlock) -> None:
