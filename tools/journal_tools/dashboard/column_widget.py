@@ -9,6 +9,7 @@ from textual.widgets import Rule, Static
 from rich.console import Group
 
 from models.file import TaskBlock
+from os_utils import FileWriter
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from models import get_minutes
 from tools.journal_tools.planner.state import PlannerState
@@ -139,7 +140,7 @@ class DayEntry(Widget, can_focus=True):
         fp = cache.file_path
         if fp is None:
             fp = os.path.join(self._directory, self._date.strftime("%Y-%m-%d.md"))
-            open(fp, "w").close()
+            FileWriter.touch(fp)
             self._planner.reload_day_by_key(day_key, new_file_path=fp)
             fp = self._planner.days[day_key].file_path
 

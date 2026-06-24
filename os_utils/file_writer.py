@@ -1,6 +1,7 @@
 import os
 
 from models import Task, get_minutes
+from models.file import Node, serialize
 
 
 def task_block_end(task: Task, sorted_tasks: list, total_lines: int) -> int:
@@ -114,6 +115,16 @@ class FileWriter:
             else:
                 result.append(line)
         return result
+
+    @staticmethod
+    def touch(file_path: str) -> None:
+        """Create an empty file if it does not already exist."""
+        open(file_path, 'a').close()
+
+    @staticmethod
+    def write_nodes(file_path: str, nodes: list[Node]) -> None:
+        """Serialize a node tree and write it atomically to file_path."""
+        FileWriter.write_atomic(file_path, serialize(nodes).splitlines(keepends=True))
 
     @staticmethod
     def write_atomic(file_path: str, lines: list[str]) -> None:

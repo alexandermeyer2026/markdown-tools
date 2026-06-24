@@ -1,7 +1,6 @@
 import os
 
 from os_utils import BackupManager, FileWriter
-from models.file import serialize
 
 
 def has_changes(day) -> bool:
@@ -13,8 +12,7 @@ def save(day, directory):
         return
     if day.file_path is None:
         raise ValueError("cannot save a day with no file path")
-    content = serialize(day.nodes)
     if os.path.exists(day.file_path):
         BackupManager.backup(day.file_path, directory)
-    FileWriter.write_atomic(day.file_path, content.splitlines(keepends=True))
+    FileWriter.write_nodes(day.file_path, day.nodes)
     day._saved_version = day._version

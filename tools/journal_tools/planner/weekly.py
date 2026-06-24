@@ -4,7 +4,7 @@ import os
 from config import get_indent_step
 from models import Task, get_minutes
 from os_utils import BackupManager, FileFinder, FileWriter
-from models.file import RawLine, TaskBlock, compute_field_ranges, parse, serialize
+from models.file import RawLine, TaskBlock, compute_field_ranges, parse
 from .state import DayCache, WeekState
 from .utils import week_expanded
 
@@ -31,12 +31,11 @@ def save_cache(cache: dict, directory: str) -> None:
     for key, day in cache.items():
         if not day.has_changes:
             continue
-        content = serialize(day.nodes)
         if day.file_path is None:
             day.file_path = os.path.join(directory, f"{key}.md")
         if os.path.exists(day.file_path):
             BackupManager.backup(day.file_path, directory)
-        FileWriter.write_atomic(day.file_path, content.splitlines(keepends=True))
+        FileWriter.write_nodes(day.file_path, day.nodes)
         day._saved_version = day._version
 
 

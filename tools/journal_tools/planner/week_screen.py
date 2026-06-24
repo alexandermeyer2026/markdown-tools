@@ -11,6 +11,7 @@ from textual.widget import Widget
 
 from models import Task, TaskTime
 from models.file import TaskBlock
+from os_utils import FileWriter
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import PlannerState, WeekState
 from .utils import week_expanded
@@ -492,7 +493,7 @@ class WeekGrid(Widget, can_focus=True):
             fp = self._planner.days[day_key].file_path
             if fp is None:
                 fp = os.path.join(self._directory, day.strftime("%Y-%m-%d.md"))
-                open(fp, "w").close()
+                FileWriter.touch(fp)
                 self._planner.days[day_key].file_path = fp
 
             def on_day_closed(_result: object) -> None:

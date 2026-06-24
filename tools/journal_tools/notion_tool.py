@@ -7,7 +7,7 @@ from config import get_indent_step
 from models import Task, TaskTime
 from os_utils import BackupManager, FileFinder
 from os_utils.file_writer import FileWriter
-from models.file import RawLine, TaskBlock, parse, serialize
+from models.file import RawLine, TaskBlock, parse
 from tools.journal_tools.cli_utils import parse_date_flags
 
 
@@ -184,10 +184,8 @@ class NotionTool:
                 print(f"  Warning: {date}.md has {runs} task sections — consolidating into one")
             new_task_nodes = _rows_to_nodes(by_date[date])
             new_nodes = _replace_task_runs(nodes, new_task_nodes)
-            content = serialize(new_nodes)
-
             BackupManager.backup(file_path, journal_dir)
-            FileWriter.write_atomic(file_path, content.splitlines(keepends=True))
+            FileWriter.write_nodes(file_path, new_nodes)
             print(f"  Updated {date}.md")
             updated += 1
 
