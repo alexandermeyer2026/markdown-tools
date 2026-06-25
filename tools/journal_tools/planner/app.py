@@ -19,8 +19,8 @@ class PlannerApp(App):
         self.planner = PlannerState(directory)
 
     async def on_mount(self) -> None:
-        from .week_screen import WeekScreen
-        from .day_screen import DayScreen
+        from .weekly import WeekScreen
+        from .daily import DayScreen
 
         if self.file_path:
             await self.push_screen(

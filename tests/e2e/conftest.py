@@ -35,7 +35,7 @@ def run_planner_scenario():
                 mock_dt.timedelta = datetime.timedelta
                 mock_dt.date.fromisoformat = datetime.date.fromisoformat
                 patches.append(
-                    patch('tools.journal_tools.planner.week_screen.datetime', mock_dt)
+                    patch('tools.journal_tools.planner.weekly.datetime', mock_dt)
                 )
 
             file_path = None

@@ -121,7 +121,7 @@ class CalendarWidget(Widget, can_focus=True):
         return (sel_monday - current_monday).days // 7
 
     def action_open_week(self) -> None:
-        from tools.journal_tools.planner.week_screen import WeekScreen
+        from tools.journal_tools.planner.weekly import WeekScreen
 
         def _on_closed(_: object) -> None:
             self.screen.reload_columns()

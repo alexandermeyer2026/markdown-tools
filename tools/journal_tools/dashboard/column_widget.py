@@ -144,7 +144,7 @@ class DayEntry(Widget, can_focus=True):
             self._planner.reload_day_by_key(day_key, new_file_path=fp)
             fp = self._planner.days[day_key].file_path
 
-        from tools.journal_tools.planner.day_screen import DayScreen
+        from tools.journal_tools.planner.daily import DayScreen
 
         def _on_closed(_: object) -> None:
             self._planner.reload_day_by_key(day_key)
