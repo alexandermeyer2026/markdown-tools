@@ -18,13 +18,17 @@ class FieldRange:
     start: int
     end: int
 
-    def slice(self, s: str) -> str:
-        return s[self.start:self.end]
-
-
 @dataclass
 class RawLine:
     raw: str  # exact line content, including newline
+
+
+def _body_to_nodes(body: str, indent: str) -> list:
+    nodes = []
+    for line in body.split('\n'):
+        stripped = line.strip()
+        nodes.append(RawLine(indent + stripped + '\n') if stripped else RawLine('\n'))
+    return nodes
 
 
 @dataclass
@@ -50,7 +54,7 @@ class TaskBlock:
         r = self.checkbox_range
         self.header = self.header[:r.start] + char + self.header[r.end:]
         self.task.status = status
-        self.checkbox_range = FieldRange(r.start, r.start + len(char))
+        self._refresh_ranges()
 
     def set_time(self, new_time: Optional[TaskTime]) -> None:
         new_text = new_time.to_str() + ' ' if new_time is not None else ''
@@ -94,11 +98,7 @@ class TaskBlock:
                 trailing.insert(0, node)
             else:
                 break
-        body_nodes = []
-        if body:
-            for line in body.split('\n'):
-                stripped = line.strip()
-                body_nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
+        body_nodes = _body_to_nodes(body, body_indent) if body else []
         self.nodes[:] = body_nodes + list(subtasks) + trailing
 
     @classmethod
@@ -109,16 +109,11 @@ class TaskBlock:
         nodes = []
         if body:
             body_indent = (task.indent or '') + indent_step
-            for line in body.split('\n'):
-                stripped = line.strip()
-                nodes.append(RawLine(body_indent + stripped + '\n') if stripped else RawLine('\n'))
+            nodes.extend(_body_to_nodes(body, body_indent))
+        expected_indent = (task.indent or '') + indent_step
         for child_block in (subtask_blocks or []):
-            expected_indent = (task.indent or '') + indent_step
             if child_block.task.indent != expected_indent:
-                old_indent = child_block.task.indent or ''
-                child_block.header = expected_indent + child_block.header[len(old_indent):]
-                child_block.task.indent = expected_indent
-                child_block._refresh_ranges()
+                _reindent_block(child_block, expected_indent)
             nodes.append(child_block)
         header = task.to_line() + '\n'
         ranges = compute_field_ranges(header) or (None, None, None, None)
@@ -270,8 +265,7 @@ def parse_lines(lines: list[str]) -> list[Node]:
             indent_len = len(task.indent)
             while stack and stack[-1][0] >= indent_len:
                 stack.pop()
-            ranges = compute_field_ranges(line)
-            cbx_r, time_r, pri_r, title_r = ranges
+            cbx_r, time_r, pri_r, title_r = compute_field_ranges(line) or (None, None, None, None)
             block = TaskBlock(
                 task=task,
                 header=line,
@@ -311,13 +305,12 @@ def parse(file_path: str) -> list[Node]:
 def write_nodes(file_path: str, nodes: list[Node]) -> None:
     """Serialize a node tree and write it atomically to file_path."""
     content = serialize(nodes)
-    lines = content.splitlines(keepends=True)
-    if lines and not lines[-1].endswith('\n'):
-        lines[-1] += '\n'
+    if content and not content.endswith('\n'):
+        content += '\n'
     tmp = file_path + '.tmp'
     try:
         with open(tmp, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
+            f.write(content)
         os.replace(tmp, file_path)
     except Exception:
         if os.path.exists(tmp):
@@ -406,9 +399,7 @@ def _reindent_block(block: TaskBlock, new_indent: str) -> None:
     new_body_indent = new_indent + get_indent_step()
     block.header = new_indent + block.header[len(old_indent):]
     block.task.indent = new_indent
-    result = compute_field_ranges(block.header)
-    if result is not None:
-        block.checkbox_range, block.time_range, block.priority_range, block.title_range = result
+    block._refresh_ranges()
     for node in block.nodes:
         if isinstance(node, RawLine) and node.raw.strip():
             if node.raw.startswith(old_body_indent):
@@ -460,18 +451,11 @@ def move_block_in_nodes(nodes: list, task: Task, direction: int) -> bool:
     if block.task.time:
         return False
     container, idx = path[-1]
-    if direction > 0:
-        target_idx = next(
-            (i for i in range(idx + 1, len(container))
-             if isinstance(container[i], TaskBlock) and not container[i].task.time),
-            None,
-        )
-    else:
-        target_idx = next(
-            (i for i in range(idx - 1, -1, -1)
-             if isinstance(container[i], TaskBlock) and not container[i].task.time),
-            None,
-        )
+    rng = range(idx + 1, len(container)) if direction > 0 else range(idx - 1, -1, -1)
+    target_idx = next(
+        (i for i in rng if isinstance(container[i], TaskBlock) and not container[i].task.time),
+        None,
+    )
     if target_idx is None:
         return False
     container[idx], container[target_idx] = container[target_idx], container[idx]
