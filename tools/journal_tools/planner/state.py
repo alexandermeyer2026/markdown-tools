@@ -5,7 +5,13 @@ from models import Task
 from os_utils import FileFinder
 import copy
 
-from models.file import TaskBlock, compute_field_ranges, parse
+from models.file import (
+    TaskBlock, parse,
+    append_block, remove_block, sort_timed_nodes,
+    tab_task, shift_tab_task, move_block_in_nodes,
+    insert_task as _insert_task,
+    detach_child_blocks,
+)
 
 
 def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
@@ -87,7 +93,6 @@ class DayCache:
         self._bump()
 
     def set_time(self, task, time) -> None:
-        from .weekly import sort_timed_nodes
         if task.time == time:
             return
         block = self.find_block(task)
@@ -99,7 +104,6 @@ class DayCache:
         self._bump()
 
     def update_task(self, task, title: str, status: str, time, body, subtasks) -> None:
-        from .weekly import sort_timed_nodes
         block = self.find_block(task)
         if block is None:
             task.title = title
@@ -114,18 +118,21 @@ class DayCache:
         self._bump()
 
     def add_block(self, block: TaskBlock) -> None:
-        from .weekly import append_block
         append_block(self.nodes, block)
         self._bump()
 
+    def insert_task(self, task, body: str | None = None,
+                    subtasks: list | None = None) -> TaskBlock:
+        block = _insert_task(self.nodes, task, body, subtasks)
+        self._bump()
+        return block
+
     def remove_block(self, block: TaskBlock) -> None:
-        from .weekly import remove_block as _remove
-        _remove(self.nodes, block)
+        remove_block(self.nodes, block)
         self._bump()
 
     def move_block_to(self, block: TaskBlock, dst: 'DayCache') -> None:
-        from .weekly import append_block, remove_block as _remove, sort_timed_nodes
-        _remove(self.nodes, block)
+        remove_block(self.nodes, block)
         self._bump()
         append_block(dst.nodes, block)
         if block.task.time:
@@ -141,39 +148,27 @@ class DayCache:
         unfinished = [b for b in child_blocks if b.task.status not in ("done", "failed", "started")]
         if not unfinished:
             return False
-        unfinished_ids = {id(b) for b in unfinished}
-        block.nodes[:] = [
-            n for n in block.nodes
-            if not (isinstance(n, TaskBlock) and id(n) in unfinished_ids)
-        ]
+        detach_child_blocks(block, unfinished)
         self._bump()
         new_task = Task(title=task.title, status="todo", time=None, line_number=-1, indent="")
-        _header = new_task.to_line() + '\n'
-        _ranges = compute_field_ranges(_header) or (None, None, None, None)
-        new_block = TaskBlock(task=new_task, header=_header, nodes=list(unfinished),
-                              checkbox_range=_ranges[0], time_range=_ranges[1],
-                              priority_range=_ranges[2], title_range=_ranges[3])
-        from .weekly import append_block
+        new_block = TaskBlock.from_task(new_task, subtask_blocks=unfinished)
         append_block(dst.nodes, new_block)
         dst._bump()
         return True
 
     def tab_task_block(self, task) -> bool:
-        from .weekly import tab_task
         result = tab_task(self.nodes, task)
         if result:
             self._bump()
         return result
 
     def shift_tab_task_block(self, task) -> bool:
-        from .weekly import shift_tab_task
         result = shift_tab_task(self.nodes, task)
         if result:
             self._bump()
         return result
 
     def reorder_block(self, task, direction: int) -> bool:
-        from .weekly import move_block_in_nodes
         result = move_block_in_nodes(self.nodes, task, direction)
         if result:
             self._bump()

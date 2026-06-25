@@ -9,9 +9,8 @@ from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widget import Widget
 
-from config import get_indent_step
-from models import Task, TaskTime, get_minutes
-from models.file import RawLine, TaskBlock, compute_field_ranges, parse
+from models import Task, TaskTime
+from models.file import parse
 from os_utils import BackupManager, FileFinder, FileWriter
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import DayCache, PlannerState, WeekState
@@ -49,133 +48,6 @@ def save_cache(cache: dict, directory: str) -> None:
         FileWriter.write_nodes(day.file_path, day.nodes)
         day._saved_version = day._version
 
-
-# ── Node tree operations ──────────────────────────────────────────────────────
-
-def _find_path_for_task(nodes: list, task: Task) -> 'tuple[TaskBlock, list[tuple[list, int]]] | None':
-    """Find task's block and return (block, path) where path is [(container, idx), ...]
-    from the root nodes down; the last element is the block's direct container location."""
-    for i, node in enumerate(nodes):
-        if isinstance(node, TaskBlock):
-            if node.task is task:
-                return node, [(nodes, i)]
-            result = _find_path_for_task(node.nodes, task)
-            if result is not None:
-                block, path = result
-                return block, [(nodes, i)] + path
-    return None
-
-
-def _reindent_block(block: TaskBlock, new_indent: str) -> None:
-    """Recursively update task.indent and RawLine body indents for a block tree."""
-    indent_step = get_indent_step()
-    old_indent = block.task.indent
-    old_body_indent = old_indent + indent_step
-    new_body_indent = new_indent + indent_step
-    block.header = new_indent + block.header[len(old_indent):]
-    block.task.indent = new_indent
-    result = compute_field_ranges(block.header)
-    if result is not None:
-        block.checkbox_range, block.time_range, block.priority_range, block.title_range = result
-    for node in block.nodes:
-        if isinstance(node, RawLine) and node.raw.strip():
-            if node.raw.startswith(old_body_indent):
-                node.raw = new_body_indent + node.raw[len(old_body_indent):]
-        elif isinstance(node, TaskBlock):
-            _reindent_block(node, new_body_indent)
-
-
-def tab_task(nodes: list, task: Task) -> bool:
-    """Indent task under the preceding sibling, making it a subtask. Returns True if moved."""
-    result = _find_path_for_task(nodes, task)
-    if result is None:
-        return False
-    block, path = result
-    container, idx = path[-1]
-    prev_block = next(
-        (container[i] for i in range(idx - 1, -1, -1) if isinstance(container[i], TaskBlock)),
-        None,
-    )
-    if prev_block is None:
-        return False
-    container.pop(idx)
-    _reindent_block(block, prev_block.task.indent + get_indent_step())
-    prev_block.nodes.append(block)
-    return True
-
-
-def shift_tab_task(nodes: list, task: Task) -> bool:
-    """Dedent task, promoting it to a sibling placed after its parent. Returns True if moved."""
-    result = _find_path_for_task(nodes, task)
-    if result is None or len(result[1]) < 2:
-        return False
-    block, path = result
-    container, idx = path[-1]
-    grandparent_container, parent_idx = path[-2]
-    parent_block = grandparent_container[parent_idx]
-    container.pop(idx)
-    grandparent_container.insert(parent_idx + 1, block)
-    _reindent_block(block, parent_block.task.indent)
-    return True
-
-
-def move_block_in_nodes(nodes: list, task: Task, direction: int) -> bool:
-    """Swap an untimed task's block with the adjacent untimed sibling in direction (+1 down, -1 up).
-    Timed siblings are skipped. Returns True if the swap happened."""
-    result = _find_path_for_task(nodes, task)
-    if result is None:
-        return False
-    block, path = result
-    if block.task.time:
-        return False
-    container, idx = path[-1]
-    if direction > 0:
-        target_idx = next(
-            (i for i in range(idx + 1, len(container))
-             if isinstance(container[i], TaskBlock) and not container[i].task.time),
-            None,
-        )
-    else:
-        target_idx = next(
-            (i for i in range(idx - 1, -1, -1)
-             if isinstance(container[i], TaskBlock) and not container[i].task.time),
-            None,
-        )
-    if target_idx is None:
-        return False
-    container[idx], container[target_idx] = container[target_idx], container[idx]
-    return True
-
-
-def remove_block(nodes: list, block: TaskBlock) -> bool:
-    """Remove a TaskBlock from nodes (searches recursively). Returns True if found."""
-    for i, node in enumerate(nodes):
-        if node is block:
-            nodes.pop(i)
-            return True
-        if isinstance(node, TaskBlock):
-            if remove_block(node.nodes, block):
-                return True
-    return False
-
-
-def append_block(nodes: list, block: TaskBlock) -> None:
-    """Append a TaskBlock to the node list."""
-    nodes.append(block)
-
-
-def sort_timed_nodes(nodes: list) -> None:
-    """Sort top-level TaskBlocks by start time in-place; untimed tasks follow timed."""
-    blocks = [n for n in nodes if isinstance(n, TaskBlock)]
-    timed = sorted([b for b in blocks if b.task.time],
-                   key=lambda b: get_minutes(b.task.time.start))
-    untimed = [b for b in blocks if not b.task.time]
-    sorted_blocks = timed + untimed
-    if sorted_blocks == blocks:
-        return
-    block_positions = [i for i, n in enumerate(nodes) if isinstance(n, TaskBlock)]
-    for pos, block in zip(block_positions, sorted_blocks):
-        nodes[pos] = block
 
 
 def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int) -> int:
@@ -763,9 +635,8 @@ class WeekGrid(Widget, can_focus=True):
                 line_number=-1,
                 indent="",
             )
-            new_block = TaskBlock.from_task(new_task, result.body, result.subtasks)
             day_cache = self._planner.days[day_key]
-            day_cache.add_block(new_block)
+            day_cache.insert_task(new_task, result.body, result.subtasks)
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(), on_form_result)

@@ -13,7 +13,7 @@ from textual.widgets import Button, Input, Label, Select, TextArea
 
 from config import get_indent_step
 from models import Task, TaskTime
-from models.file import RawLine, TaskBlock
+from models.file import RawLine, TaskBlock, remove_block
 from tools.journal_tools.rendering import STATUS_ICONS
 
 
@@ -158,7 +158,7 @@ class SubtaskList(Widget, can_focus=True):
         def on_confirm(confirmed: bool) -> None:
             if not confirmed:
                 return
-            self._remove_block_from_tree(target, self._children)
+            remove_block(self._children, target)
             new_flat = self._flat()
             self.cursor_idx = min(self.cursor_idx, max(len(new_flat) - 1, 0))
             self.refresh(layout=True)
@@ -168,16 +168,6 @@ class SubtaskList(Widget, can_focus=True):
             SaveDialog("Delete subtask and all its children?"),
             on_confirm,
         )
-
-    def _remove_block_from_tree(self, target, container: list) -> bool:
-        for i, item in enumerate(container):
-            if isinstance(item, TaskBlock):
-                if item is target:
-                    container.pop(i)
-                    return True
-                if self._remove_block_from_tree(target, item.nodes):
-                    return True
-        return False
 
 
 class TaskFormScreen(ModalScreen[TaskFormResult | None]):

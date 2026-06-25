@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from config import get_task_config, get_indent_step
-from models.task import Task, TaskTime, status_char_map
+from models.task import Task, TaskTime, get_minutes, status_char_map
 
 
 _TAG_LINE_RE = re.compile(r'^\s*(#[\w-]+)(\s+#[\w-]+)*\s*$')
@@ -318,10 +318,142 @@ class File:
             self.nodes = []
 
 
-def insert_task(nodes: list, task: Task) -> TaskBlock:
+def insert_task(nodes: list, task: Task, body: str | None = None,
+                subtasks: list | None = None) -> TaskBlock:
     """Append task as a new TaskBlock. Top-level tasks get a trailing blank line; subtasks get none."""
-    block = TaskBlock.from_task(task)
+    block = TaskBlock.from_task(task, body, subtasks)
     if not task.indent:
         block.nodes.append(RawLine('\n'))
     nodes.append(block)
     return block
+
+
+def append_block(nodes: list, block: TaskBlock) -> None:
+    """Append a TaskBlock to the node list."""
+    nodes.append(block)
+
+
+def detach_child_blocks(parent: TaskBlock, children: list) -> None:
+    """Remove specific child TaskBlocks from parent.nodes in-place."""
+    remove_ids = {id(b) for b in children}
+    parent.nodes[:] = [
+        n for n in parent.nodes
+        if not (isinstance(n, TaskBlock) and id(n) in remove_ids)
+    ]
+
+
+def remove_block(nodes: list, block: TaskBlock) -> bool:
+    """Remove a TaskBlock from nodes (searches recursively). Returns True if found."""
+    for i, node in enumerate(nodes):
+        if node is block:
+            nodes.pop(i)
+            return True
+        if isinstance(node, TaskBlock):
+            if remove_block(node.nodes, block):
+                return True
+    return False
+
+
+def sort_timed_nodes(nodes: list) -> None:
+    """Sort top-level TaskBlocks by start time in-place; untimed tasks follow timed."""
+    blocks = [n for n in nodes if isinstance(n, TaskBlock)]
+    timed = sorted([b for b in blocks if b.task.time],
+                   key=lambda b: get_minutes(b.task.time.start))
+    untimed = [b for b in blocks if not b.task.time]
+    sorted_blocks = timed + untimed
+    if sorted_blocks == blocks:
+        return
+    block_positions = [i for i, n in enumerate(nodes) if isinstance(n, TaskBlock)]
+    for pos, block in zip(block_positions, sorted_blocks):
+        nodes[pos] = block
+
+
+def _find_path_for_task(nodes: list, task: Task) -> 'tuple[TaskBlock, list[tuple[list, int]]] | None':
+    for i, node in enumerate(nodes):
+        if isinstance(node, TaskBlock):
+            if node.task is task:
+                return node, [(nodes, i)]
+            result = _find_path_for_task(node.nodes, task)
+            if result is not None:
+                block, path = result
+                return block, [(nodes, i)] + path
+    return None
+
+
+def _reindent_block(block: TaskBlock, new_indent: str) -> None:
+    """Recursively update task.indent and RawLine body indents for a block tree."""
+    old_indent = block.task.indent
+    old_body_indent = old_indent + get_indent_step()
+    new_body_indent = new_indent + get_indent_step()
+    block.header = new_indent + block.header[len(old_indent):]
+    block.task.indent = new_indent
+    result = compute_field_ranges(block.header)
+    if result is not None:
+        block.checkbox_range, block.time_range, block.priority_range, block.title_range = result
+    for node in block.nodes:
+        if isinstance(node, RawLine) and node.raw.strip():
+            if node.raw.startswith(old_body_indent):
+                node.raw = new_body_indent + node.raw[len(old_body_indent):]
+        elif isinstance(node, TaskBlock):
+            _reindent_block(node, new_body_indent)
+
+
+def tab_task(nodes: list, task: Task) -> bool:
+    """Indent task under the preceding sibling, making it a subtask. Returns True if moved."""
+    result = _find_path_for_task(nodes, task)
+    if result is None:
+        return False
+    block, path = result
+    container, idx = path[-1]
+    prev_block = next(
+        (container[i] for i in range(idx - 1, -1, -1) if isinstance(container[i], TaskBlock)),
+        None,
+    )
+    if prev_block is None:
+        return False
+    container.pop(idx)
+    _reindent_block(block, prev_block.task.indent + get_indent_step())
+    prev_block.nodes.append(block)
+    return True
+
+
+def shift_tab_task(nodes: list, task: Task) -> bool:
+    """Dedent task, promoting it to a sibling placed after its parent. Returns True if moved."""
+    result = _find_path_for_task(nodes, task)
+    if result is None or len(result[1]) < 2:
+        return False
+    block, path = result
+    container, idx = path[-1]
+    grandparent_container, parent_idx = path[-2]
+    parent_block = grandparent_container[parent_idx]
+    container.pop(idx)
+    grandparent_container.insert(parent_idx + 1, block)
+    _reindent_block(block, parent_block.task.indent)
+    return True
+
+
+def move_block_in_nodes(nodes: list, task: Task, direction: int) -> bool:
+    """Swap an untimed task's block with the adjacent untimed sibling. Returns True if swapped."""
+    result = _find_path_for_task(nodes, task)
+    if result is None:
+        return False
+    block, path = result
+    if block.task.time:
+        return False
+    container, idx = path[-1]
+    if direction > 0:
+        target_idx = next(
+            (i for i in range(idx + 1, len(container))
+             if isinstance(container[i], TaskBlock) and not container[i].task.time),
+            None,
+        )
+    else:
+        target_idx = next(
+            (i for i in range(idx - 1, -1, -1)
+             if isinstance(container[i], TaskBlock) and not container[i].task.time),
+            None,
+        )
+    if target_idx is None:
+        return False
+    container[idx], container[target_idx] = container[target_idx], container[idx]
+    return True

@@ -515,9 +515,8 @@ class DayGrid(Widget, can_focus=True):
                 line_number=-1,
                 indent="",
             )
-            block = TaskBlock.from_task(new_task, result.body, result.subtasks)
             day = self._day()
-            day.add_block(block)
+            day.insert_task(new_task, result.body, result.subtasks)
             nav = self._navigable()
             self.cursor_idx = next(
                 (i for i, t in enumerate(nav) if t is new_task), len(nav) - 1
