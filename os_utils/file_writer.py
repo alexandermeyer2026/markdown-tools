@@ -1,7 +1,6 @@
-import os
+from __future__ import annotations
 
-from models import Task
-from models.file import Node, serialize
+import os
 
 
 def task_block_end(task: Task, sorted_tasks: list, total_lines: int) -> int:
@@ -71,11 +70,6 @@ class FileWriter:
     def touch(file_path: str) -> None:
         """Create an empty file if it does not already exist."""
         open(file_path, 'a').close()
-
-    @staticmethod
-    def write_nodes(file_path: str, nodes: list[Node]) -> None:
-        """Serialize a node tree and write it atomically to file_path."""
-        FileWriter._write_atomic(file_path, serialize(nodes).splitlines(keepends=True))
 
     @staticmethod
     def write_lines(file_path: str, lines: list[str]) -> None:

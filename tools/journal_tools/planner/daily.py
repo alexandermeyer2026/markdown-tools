@@ -11,8 +11,8 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime, get_minutes, minutes_to_time
-from models.file import RawLine, TaskBlock
-from os_utils import BackupManager, FileWriter
+from models.file import RawLine, TaskBlock, write_nodes
+from os_utils import BackupManager
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_STYLES, get_time_slot, scale_lines,
 )
@@ -32,7 +32,7 @@ def save(day: DayCache, directory: str) -> None:
         raise ValueError("cannot save a day with no file path")
     if os.path.exists(day.file_path):
         BackupManager.backup(day.file_path, directory)
-    FileWriter.write_nodes(day.file_path, day.nodes)
+    write_nodes(day.file_path, day.nodes)
     day._saved_version = day._version
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Optional, Union
@@ -305,6 +306,23 @@ def parse(file_path: str) -> list[Node]:
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     return parse_lines(lines)
+
+
+def write_nodes(file_path: str, nodes: list[Node]) -> None:
+    """Serialize a node tree and write it atomically to file_path."""
+    content = serialize(nodes)
+    lines = content.splitlines(keepends=True)
+    if lines and not lines[-1].endswith('\n'):
+        lines[-1] += '\n'
+    tmp = file_path + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        os.replace(tmp, file_path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def find_block(nodes: list, task: Task) -> 'TaskBlock | None':

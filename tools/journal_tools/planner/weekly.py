@@ -10,7 +10,7 @@ from textual.screen import Screen
 from textual.widget import Widget
 
 from models import Task, TaskTime
-from models.file import parse
+from models.file import parse, write_nodes
 from os_utils import BackupManager, FileFinder, FileWriter
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
 from .state import DayCache, PlannerState, WeekState
@@ -45,7 +45,7 @@ def save_cache(cache: dict, directory: str) -> None:
             day.file_path = os.path.join(directory, f"{key}.md")
         if os.path.exists(day.file_path):
             BackupManager.backup(day.file_path, directory)
-        FileWriter.write_nodes(day.file_path, day.nodes)
+        write_nodes(day.file_path, day.nodes)
         day._saved_version = day._version
 
 

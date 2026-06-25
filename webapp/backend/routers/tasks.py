@@ -7,10 +7,9 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from models.file import RawLine, TaskBlock, all_tasks, insert_task, parse, find_block
+from models.file import RawLine, TaskBlock, all_tasks, insert_task, parse, find_block, write_nodes
 from models.task import Task, TaskTime, status_char_map
 from os_utils.backup_manager import BackupManager
-from os_utils.file_writer import FileWriter
 
 router = APIRouter()
 
@@ -71,7 +70,7 @@ def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_use
     task = Task(title=req.title, status=req.status, time=time, line_number=-1, indent="")
     nodes = parse(str(path))
     insert_task(nodes, task)
-    FileWriter.write_nodes(str(path), nodes)
+    write_nodes(str(path), nodes)
 
     return {"message": "created"}
 
@@ -102,6 +101,6 @@ def update_task_status(
     if found_block is None:
         raise HTTPException(status_code=500, detail="Block not found for task — file may have changed")
     found_block.set_status(req.status)
-    FileWriter.write_nodes(str(path), nodes)
+    write_nodes(str(path), nodes)
 
     return {"message": "updated", "task": _task_to_dict(found_block)}
