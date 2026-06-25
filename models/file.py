@@ -307,15 +307,16 @@ def parse(file_path: str) -> list[Node]:
     return parse_lines(lines)
 
 
-class File:
-    def __init__(self, path: str):
-        self.path = path
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            self.nodes: list[Node] = parse_lines(lines)
-        except FileNotFoundError:
-            self.nodes = []
+def find_block(nodes: list, task: Task) -> 'TaskBlock | None':
+    """Recursively find the TaskBlock whose task is identical (by identity) to the given task."""
+    for node in nodes:
+        if isinstance(node, TaskBlock):
+            if node.task is task:
+                return node
+            result = find_block(node.nodes, task)
+            if result is not None:
+                return result
+    return None
 
 
 def insert_task(nodes: list, task: Task, body: str | None = None,

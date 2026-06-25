@@ -7,23 +7,12 @@ from typing import Optional
 from .auth import get_current_user
 from .deps import journal_dir, resolve_journal_file
 
-from models.file import File, RawLine, TaskBlock, all_tasks, insert_task
+from models.file import RawLine, TaskBlock, all_tasks, insert_task, parse, find_block
 from models.task import Task, TaskTime, status_char_map
 from os_utils.backup_manager import BackupManager
 from os_utils.file_writer import FileWriter
 
 router = APIRouter()
-
-
-def _find_block(nodes: list, task: Task) -> 'TaskBlock | None':
-    for node in nodes:
-        if isinstance(node, TaskBlock):
-            if node.task is task:
-                return node
-            result = _find_block(node.nodes, task)
-            if result is not None:
-                return result
-    return None
 
 
 def _task_to_dict(block: TaskBlock) -> dict:
@@ -56,10 +45,10 @@ class UpdateTaskRequest(BaseModel):
 def get_tasks(date: str, _user=Depends(get_current_user)):
     path = resolve_journal_file(date)
     try:
-        file = File(str(path))
+        nodes = parse(str(path))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse file: {e}")
-    top_level_blocks = [n for n in file.nodes if isinstance(n, TaskBlock)]
+    top_level_blocks = [n for n in nodes if isinstance(n, TaskBlock)]
     return {"date": date, "tasks": [_task_to_dict(b) for b in top_level_blocks]}
 
 
@@ -80,9 +69,9 @@ def create_task(date: str, req: CreateTaskRequest, _user=Depends(get_current_use
         time = TaskTime(start=req.time_start, end=req.time_end if req.time_end else None)
 
     task = Task(title=req.title, status=req.status, time=time, line_number=-1, indent="")
-    file = File(str(path))
-    insert_task(file.nodes, task)
-    FileWriter.write_nodes(str(path), file.nodes)
+    nodes = parse(str(path))
+    insert_task(nodes, task)
+    FileWriter.write_nodes(str(path), nodes)
 
     return {"message": "created"}
 
@@ -102,18 +91,17 @@ def update_task_status(
         )
 
     path = resolve_journal_file(date)
-    file = File(str(path))
-    task = next((t for t in all_tasks(file.nodes) if t.line_number == line_number), None)
+    nodes = parse(str(path))
+    task = next((t for t in all_tasks(nodes) if t.line_number == line_number), None)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found at that line")
 
     BackupManager.backup(str(path), str(journal_dir()))
 
-    found_block = _find_block(file.nodes, task)
-    if found_block:
-        found_block.set_status(req.status)
-    else:
-        task.status = req.status
-    FileWriter.write_nodes(str(path), file.nodes)
+    found_block = find_block(nodes, task)
+    if found_block is None:
+        raise HTTPException(status_code=500, detail="Block not found for task — file may have changed")
+    found_block.set_status(req.status)
+    FileWriter.write_nodes(str(path), nodes)
 
-    return {"message": "updated", "task": _task_to_dict(found_block) if found_block else {"title": task.title, "status": task.status}}
+    return {"message": "updated", "task": _task_to_dict(found_block)}

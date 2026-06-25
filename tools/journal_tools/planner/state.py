@@ -11,18 +11,8 @@ from models.file import (
     tab_task, shift_tab_task, move_block_in_nodes,
     insert_task as _insert_task,
     detach_child_blocks,
+    find_block as _find_block,
 )
-
-
-def _find_block_in(nodes: list, task) -> 'TaskBlock | None':
-    for node in nodes:
-        if isinstance(node, TaskBlock):
-            if node.task is task:
-                return node
-            result = _find_block_in(node.nodes, task)
-            if result is not None:
-                return result
-    return None
 
 
 class DayCache:
@@ -47,7 +37,7 @@ class DayCache:
         return [n for n in self.nodes if isinstance(n, TaskBlock)]
 
     def find_block(self, task) -> 'TaskBlock | None':
-        return _find_block_in(self.nodes, task)
+        return _find_block(self.nodes, task)
 
     # ── Checkpointing ─────────────────────────────────────────────────────────
 
@@ -86,34 +76,29 @@ class DayCache:
         if task.status == status:
             return
         block = self.find_block(task)
-        if block:
-            block.set_status(status)
-        else:
-            task.status = status
+        if block is None:
+            raise ValueError(f"Block not found for task {task.title!r} — task may not belong to this DayCache")
+        block.set_status(status)
         self._bump()
 
     def set_time(self, task, time) -> None:
         if task.time == time:
             return
         block = self.find_block(task)
-        if block:
-            block.set_time(time)
-        else:
-            task.time = time
+        if block is None:
+            raise ValueError(f"Block not found for task {task.title!r} — task may not belong to this DayCache")
+        block.set_time(time)
         sort_timed_nodes(self.nodes)
         self._bump()
 
     def update_task(self, task, title: str, status: str, time, body, subtasks) -> None:
         block = self.find_block(task)
         if block is None:
-            task.title = title
-            task.status = status
-            task.time = time
-        else:
-            block.set_status(status)
-            block.set_time(time)
-            block.set_title(title)
-            block.set_body_and_subtasks(body, subtasks)
+            raise ValueError(f"Block not found for task {task.title!r} — task may not belong to this DayCache")
+        block.set_status(status)
+        block.set_time(time)
+        block.set_title(title)
+        block.set_body_and_subtasks(body, subtasks)
         sort_timed_nodes(self.nodes)
         self._bump()
 
