@@ -56,6 +56,24 @@ def test_week_edit_task_via_form(run_planner_scenario):
     run_planner_scenario(run, "week/edit_task_via_form", week_today="2024-01-02")
 
 
+def test_week_edit_task_with_body_via_form(run_planner_scenario):
+    """Weekly view: open task with body text in form; body must survive the round-trip."""
+    async def run(pilot, app):
+        await pilot.press("j")        # cursor → Present roadmap (row 1, has body text)
+        await pilot.pause()
+        await pilot.press("enter")    # open edit form — was crashing with NameError: RawLine
+        await pilot.pause()
+
+        form = app.screen
+        form.query_one("#title", Input).value = "Present roadmap (reviewed)"
+
+        await pilot.press("ctrl+s")   # save form
+        await pilot.pause()
+        await _save(pilot, app)
+
+    run_planner_scenario(run, "week/edit_task_with_body", week_today="2024-01-05")
+
+
 def test_week_multiselect_shift_right(run_planner_scenario):
     """Weekly view: select 3 tasks on Tuesday with space, shift all to Wednesday with L."""
     async def run(pilot, app):

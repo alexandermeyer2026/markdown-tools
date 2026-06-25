@@ -13,7 +13,7 @@ from textual.widgets import Button, Input, Label, Select, TextArea
 
 from config import get_indent_step
 from models import Task, TaskTime
-from models.file import TaskBlock
+from models.file import RawLine, TaskBlock
 from tools.journal_tools.rendering import STATUS_ICONS
 
 
