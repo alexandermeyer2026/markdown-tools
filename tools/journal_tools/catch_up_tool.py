@@ -1,10 +1,8 @@
 import datetime
 import os
-from difflib import unified_diff
 
-from models import Task
-from os_utils import BackupManager, FileFinder, FileWriter
-from models.file import parse, all_tasks
+from os_utils import BackupManager, FileFinder
+from models.file import parse, all_tasks, find_block, write_nodes, serialize
 from tools.journal_tools.rendering import BOLD, GRAY, GREEN, RED, RESET
 
 
@@ -23,27 +21,28 @@ class CatchUpTool:
 
         for file_path in journal_files:
             nodes = parse(file_path)
-            tasks = all_tasks(nodes)
             open_tasks = [
-                task for task in tasks
-                if task.status in ['todo', 'in progress']
+                t for t in all_tasks(nodes)
+                if t.status in ['todo', 'in progress']
             ]
 
             if open_tasks:
-                if not CatchUpTool.interactive_cleanup(directory, file_path, open_tasks):
+                if not CatchUpTool.interactive_cleanup(directory, file_path, nodes, open_tasks):
                     return
 
     @staticmethod
-    def interactive_cleanup(directory, file_path, open_tasks: list[Task]):
-        """Interactive cleanup of tasks in a file"""
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        pending_changes = []  # [(line_num, old_line, new_line)]
+    def interactive_cleanup(directory, file_path, nodes, open_tasks):
+        """Interactive cleanup of tasks in a file."""
+        lines = serialize(nodes).splitlines(keepends=True)
+        pending_changes = []  # [(block, new_status, old_line, new_line)]
 
         for idx, task in enumerate(open_tasks, 1):
+            block = find_block(nodes, task)
+            if block is None:
+                continue
+
             line_num = task.line_number
-            original_line = lines[line_num - 1].rstrip('\n')
+            old_line = block.header.rstrip('\n')
 
             rel_path = os.path.relpath(file_path, directory)
             context_radius = 2
@@ -76,7 +75,7 @@ class CatchUpTool:
                         save = input("\nThere are unsaved changes. Save? [y/n]: ").strip().lower()
                         if save == 'y':
                             BackupManager.backup(file_path, directory)
-                            CatchUpTool.apply_changes(file_path, pending_changes, lines)
+                            CatchUpTool._apply_changes(file_path, nodes, pending_changes)
                     return False
 
                 if action == 's':
@@ -84,10 +83,11 @@ class CatchUpTool:
 
                 if action in ['d', 't', 'i', 'f']:
                     new_status = {'d': 'done', 't': 'todo', 'i': 'in progress', 'f': 'failed'}[action]
+                    old_status = task.status
                     task.status = new_status
                     new_line = task.to_line()
-
-                    pending_changes.append((line_num, original_line, new_line))
+                    task.status = old_status
+                    pending_changes.append((block, new_status, old_line, new_line))
                     print("✓ Change queued")
                     break
                 else:
@@ -97,38 +97,26 @@ class CatchUpTool:
             rel_path = os.path.relpath(file_path, directory)
             print(f"\n{len(pending_changes)} change(s) in {rel_path}:")
 
-            sorted_changes = sorted(pending_changes, key=lambda x: x[0])
+            sorted_changes = sorted(pending_changes, key=lambda x: x[0].task.line_number)
 
             print("   ┌" + "─" * 76)
-            for idx, (line_num, old_line, new_line) in enumerate(sorted_changes):
-                print(f"{line_num:4d}{RED} -  {old_line}{RESET}")
+            for i, (block, _, old_line, new_line) in enumerate(sorted_changes):
+                print(f"{block.task.line_number:4d}{RED} -  {old_line}{RESET}")
                 print(f"   │{GREEN} +  {new_line}{RESET}")
-                if idx < len(sorted_changes) - 1:
+                if i < len(sorted_changes) - 1:
                     print("   ├" + "─" * 76)
             print("   └" + "─" * 76)
 
             confirm = input("Apply all changes? [y/n]: ").strip().lower()
             if confirm == 'y':
                 BackupManager.backup(file_path, directory)
-                CatchUpTool.apply_changes(file_path, pending_changes, lines)
+                CatchUpTool._apply_changes(file_path, nodes, pending_changes)
                 print(f"✓ {len(pending_changes)} change(s) saved")
             else:
                 print("Changes discarded.")
 
     @staticmethod
-    def apply_changes(file_path, changes, lines):
-        """Applies changes to a file and saves it"""
-        if not changes:
-            return
-
-        changes.sort(key=lambda x: x[0], reverse=True)
-
-        for line_num, old_line, new_line in changes:
-            if line_num <= len(lines):
-                current_line = lines[line_num - 1].rstrip('\n')
-                if current_line == old_line or current_line == new_line:
-                    lines[line_num - 1] = new_line + '\n'
-                else:
-                    print(f"Warning: Line {line_num} in {file_path} has changed. Skipped.")
-
-        FileWriter.write_lines(file_path, lines)
+    def _apply_changes(file_path, nodes, pending_changes):
+        for block, new_status, _, _ in pending_changes:
+            block.set_status(new_status)
+        write_nodes(file_path, nodes)

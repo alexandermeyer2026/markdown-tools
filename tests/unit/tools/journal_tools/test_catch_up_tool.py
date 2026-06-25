@@ -43,8 +43,10 @@ class TestIntegration(unittest.TestCase):
             return f.read()
 
     def _run(self, inputs):
+        nodes = parse(self.path)
+        open_tasks = [t for t in all_tasks(nodes) if t.status in ('todo', 'in progress')]
         with patch('builtins.input', side_effect=inputs):
-            CatchUpTool.interactive_cleanup(self.directory, self.path, self._open_tasks())
+            CatchUpTool.interactive_cleanup(self.directory, self.path, nodes, open_tasks)
 
     def test_mark_all_done(self):
         self._run(['d', 'd', 'd', 'y'])
@@ -54,7 +56,7 @@ class TestIntegration(unittest.TestCase):
             "- [x] 8:00-9:00 Morning routine\n"
             "- [x] 9:00-10:30 Work on project\n"
             "- [x] 10:30-11:00: Coffee break\n"
-            "- [x] 11:00-12:00 Team meeting\n"
+            "- [x] 11:00-12:00: Team meeting\n"
             "- [x] 14:00 Review PRs\n"
         ))
 
@@ -106,8 +108,7 @@ class TestIntegration(unittest.TestCase):
         self._run(['d', 'd', 'd', 'n'])
         self.assertEqual(self._read(), ORIGINAL)
 
-    def test_colon_separator_normalized_on_write(self):
+    def test_header_format_preserved_on_status_change(self):
         self._run(['s', 'd', 's', 'y'])
         content = self._read()
-        self.assertIn('- [x] 11:00-12:00 Team meeting\n', content)
-        self.assertNotIn('11:00-12:00:', content)
+        self.assertIn('- [x] 11:00-12:00: Team meeting\n', content)
