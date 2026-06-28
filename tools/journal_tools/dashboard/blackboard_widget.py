@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
@@ -41,7 +42,7 @@ class BlackboardWidget(VerticalScroll, can_focus=True):
 
     def on_focus(self) -> None:
         try:
-            self.screen.query_one("#hints", Static).update("[Enter] edit · [Tab] switch · [r] refresh · [Esc] quit")
+            self.screen.query_one("#hints", Static).update(Text("[Enter] edit · [Tab] switch · [r] refresh · [Esc] quit"))
         except Exception:
             pass
 
