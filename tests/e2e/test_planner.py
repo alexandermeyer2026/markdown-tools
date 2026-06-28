@@ -377,3 +377,21 @@ def test_day_insert_subtask():
     parent = next(n for n in nodes if isinstance(n, TaskBlock))
     insert_task(parent.nodes, _task('Retrospective', indent='    '))
     assert serialize(nodes) == _expected('insert_subtask', '2024-01-03.md')
+
+
+def test_day_prose_before_task_list(run_planner_scenario):
+    """Day view: file with prose, bullets, and a numbered list before the task section.
+    Add a task via the form, save — prose must survive untouched and the new task
+    must appear after the last existing task, not merged into the prose block."""
+    async def run(pilot, app):
+        await pilot.press("n")         # open new task form
+        await pilot.pause()
+
+        form = app.screen
+        form.query_one("#title", Input).value = "New Task"
+
+        await pilot.press("ctrl+s")    # save form
+        await pilot.pause()
+        await _save(pilot, app)
+
+    run_planner_scenario(run, "day/prose_before_task_list", date="2024-01-15")
