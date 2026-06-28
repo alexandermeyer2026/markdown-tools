@@ -288,6 +288,8 @@ def parse_lines(lines: list[str]) -> list[Node]:
                 if indent_len < line_indent_len:
                     owner_nodes = block.nodes
                     break
+            if owner_nodes is top_level:
+                stack.clear()
             owner_nodes.append(RawLine(line))
 
     _extract_tags(top_level)

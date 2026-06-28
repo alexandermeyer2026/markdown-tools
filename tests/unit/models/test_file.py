@@ -119,6 +119,24 @@ class TestRoundTrip(unittest.TestCase):
         c = '- [ ] 10:00-11:00 Meeting\n'
         self.assertEqual(roundtrip(c), c)
 
+    def test_task_then_section_with_indented_non_task_content(self):
+        c = (
+            '- [ ] Task\n'
+            '    - Description\n'
+            '\n'
+            '---\n'
+            '\n'
+            '## Heading\n'
+            '\n'
+            '### Subheading\n'
+            '\n'
+            '- Something\n'
+            '    - Bullet Point\n'
+            '- Something else\n'
+            '    - Bullet point 2\n'
+        )
+        self.assertEqual(roundtrip(c), c)
+
     def test_fixture_files(self):
         cases = [
             ("two tasks trailing blank",          "- [ ] 10:00 Morning meeting\n- [ ] 09:00 Standup\n\n"),
