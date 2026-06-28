@@ -1,11 +1,13 @@
+import subprocess
 from pathlib import Path
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 
-class BlackboardWidget(VerticalScroll):
+class BlackboardWidget(VerticalScroll, can_focus=True):
     DEFAULT_CSS = """
     BlackboardWidget {
         width: 1fr;
@@ -17,6 +19,10 @@ class BlackboardWidget(VerticalScroll):
         border: solid $warning;
     }
     """
+
+    BINDINGS = [
+        Binding("enter", "open_in_editor", "Edit", show=True),
+    ]
 
     def __init__(self, desk_path: Path) -> None:
         super().__init__()
@@ -32,3 +38,14 @@ class BlackboardWidget(VerticalScroll):
 
     def reload(self) -> None:
         self.query_one("#blackboard-content", Static).update(self._read())
+
+    def on_focus(self) -> None:
+        try:
+            self.screen.query_one("#hints", Static).update("[Enter] edit · [Tab] switch · [r] refresh · [Esc] quit")
+        except Exception:
+            pass
+
+    def action_open_in_editor(self) -> None:
+        with self.app.suspend():
+            subprocess.run(["vim", str(self._desk_path)])
+        self.reload()

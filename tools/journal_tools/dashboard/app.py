@@ -137,9 +137,9 @@ class DashboardScreen(Screen):
         date_label = f"{today.strftime('%A, %-d %B %Y')}  ·  Week {week_num}"
         yield Static(Text(date_label, style="bold"), id="date-header")
         with Horizontal(id="header"):
-            yield BlackboardWidget(self._desk_path)
             yield ClockWidget()
             yield CalendarWidget(self._planner, self._directory)
+            yield BlackboardWidget(self._desk_path)
         with Horizontal(id="columns"):
             yield DayListColumn("Overdue",  self._overdue,   self._planner, self._directory)
             yield Rule(orientation="vertical")
