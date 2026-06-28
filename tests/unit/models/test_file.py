@@ -137,6 +137,45 @@ class TestRoundTrip(unittest.TestCase):
         )
         self.assertEqual(roundtrip(c), c)
 
+    def test_journal_with_mixed_prose(self):
+        c = (
+            '# Journal\n'
+            '\n'
+            'Opening paragraph.\n'
+            '\n'
+            '## Morning Notes\n'
+            '\n'
+            '    - Indented bullet\n'
+            '        - Nested bullet\n'
+            '\n'
+            '1. First item\n'
+            '2. Second item\n'
+            '3. Third item\n'
+            '\n'
+            '> Blockquote line\n'
+            '\n'
+            '```python\n'
+            'x = 1\n'
+            '```\n'
+            '\n'
+            '---\n'
+            '\n'
+            '- [ ] Task 1\n'
+            '- [ ] Task 2\n'
+            '    Task note\n'
+            '    - [ ] Subtask\n'
+            '\n'
+            '---\n'
+            '\n'
+            '## Evening Notes\n'
+            '\n'
+            'Closing paragraph.\n'
+            '\n'
+            '    - Another bullet\n'
+            '        - [ ] Checkbox-like line in prose\n'
+        )
+        self.assertEqual(roundtrip(c), c)
+
     def test_fixture_files(self):
         cases = [
             ("two tasks trailing blank",          "- [ ] 10:00 Morning meeting\n- [ ] 09:00 Standup\n\n"),
