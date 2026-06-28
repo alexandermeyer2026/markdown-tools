@@ -1,4 +1,5 @@
 import datetime
+from pathlib import Path
 
 from rich.console import Group
 from rich.text import Text
@@ -12,6 +13,7 @@ from textual.widgets import Rule, Static
 from os_utils import FileFinder
 from models.file import TaskBlock, parse
 from tools.journal_tools.planner.state import PlannerState
+from .blackboard_widget import BlackboardWidget
 from .calendar_widget import CalendarWidget
 from .column_widget import DayListColumn
 
@@ -119,6 +121,7 @@ class DashboardScreen(Screen):
         overdue_entries: list,
         today_entries: list,
         upcoming_entries: list,
+        desk_path: Path,
     ) -> None:
         super().__init__()
         self._planner = planner
@@ -126,6 +129,7 @@ class DashboardScreen(Screen):
         self._overdue = overdue_entries
         self._today = today_entries
         self._upcoming = upcoming_entries
+        self._desk_path = desk_path
 
     def compose(self) -> ComposeResult:
         today = datetime.date.today()
@@ -133,6 +137,7 @@ class DashboardScreen(Screen):
         date_label = f"{today.strftime('%A, %-d %B %Y')}  ·  Week {week_num}"
         yield Static(Text(date_label, style="bold"), id="date-header")
         with Horizontal(id="header"):
+            yield BlackboardWidget(self._desk_path)
             yield ClockWidget()
             yield CalendarWidget(self._planner, self._directory)
         with Horizontal(id="columns"):
@@ -182,14 +187,16 @@ class DashboardScreen(Screen):
 
     def action_refresh_data(self) -> None:
         self.reload_columns()
+        self.query_one(BlackboardWidget).reload()
 
     def action_quit(self) -> None:
         self.app.exit()
 
 
 class DashboardApp(App):
-    def __init__(self, directory: str) -> None:
+    def __init__(self, directory: str, journal_home: str) -> None:
         super().__init__()
+        self._desk_path = Path(journal_home) / 'desk.md'
         today = datetime.date.today()
 
         overdue_by_date = _gather(
@@ -223,5 +230,6 @@ class DashboardApp(App):
             DashboardScreen(
                 self._planner, self._directory,
                 self._overdue, self._today, self._upcoming,
+                self._desk_path,
             )
         )

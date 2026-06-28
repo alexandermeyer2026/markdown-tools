@@ -32,9 +32,12 @@ class DashboardTool:
     UPCOMING_DAYS = 7
 
     @staticmethod
-    def run(args, directory='.'):
+    def run(args, directory='.', journal_home=None):
+        from pathlib import Path
         from tools.journal_tools.dashboard.app import DashboardApp
-        DashboardApp(directory).run()
+        if journal_home is None:
+            journal_home = str(Path(directory).parent)
+        DashboardApp(directory, journal_home).run()
 
     @staticmethod
     def _run_static(args, directory='.'):

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from os_utils import FileFinder, resolve_date
 from tools.journal_tools import CatchUpTool, DashboardTool, IcsTool, NotionTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool
@@ -18,6 +19,7 @@ def _open_journal_for_date(date_string: str, directory: str) -> None:
 def main():
     args = sys.argv[1:]
     journal_dir = os.environ.get('JOURNAL_DIR', '.')
+    journal_home = os.environ.get('JOURNAL_HOME', str(Path(journal_dir).parent))
 
     if not args:
         print("Usage: main.py <command> [subcommand] [args...]")
@@ -37,7 +39,7 @@ def main():
         'timeline': lambda a: TimelineTool.run(a, journal_dir),
         'catch-up': lambda a: CatchUpTool.run(a, journal_dir),
         'planner':  lambda a: PlannerTool.run(a, journal_dir),
-        'dashboard': lambda a: DashboardTool.run(a, journal_dir),
+        'dashboard': lambda a: DashboardTool.run(a, journal_dir, journal_home),
         'sync':         lambda a: SyncTool.run(a, journal_dir),
         'time-machine': lambda a: TimeMachineTool.run(a, journal_dir),
         'notion-export': lambda a: NotionTool.export(a, journal_dir),
