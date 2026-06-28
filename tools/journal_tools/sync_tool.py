@@ -119,10 +119,11 @@ def _cmd_pull(args: list[str], journal_dir: str) -> None:
 
     if status == 200:
         from os_utils.backup_manager import BackupManager
+        from os_utils import FileWriter
         dest = Path(journal_dir) / f'{date}.md'
         if dest.exists():
             BackupManager.backup(str(dest), journal_dir)
-        dest.write_bytes(data)
+        FileWriter.write_str(str(dest), data.decode('utf-8'))
         print(f"Pulled {date}.md")
     elif status == 401:
         print("Token expired. Run: journal sync login <server-url>")

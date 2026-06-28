@@ -77,6 +77,11 @@ class FileWriter:
         FileWriter._write_atomic(file_path, lines)
 
     @staticmethod
+    def write_str(file_path: str, content: str) -> None:
+        """Write a string atomically to file_path."""
+        FileWriter._write_atomic(file_path, [content] if content else [])
+
+    @staticmethod
     def _write_atomic(file_path: str, lines: list[str]) -> None:
         tmp = file_path + '.tmp'
         try:
