@@ -362,14 +362,14 @@ def remove_block(nodes: list, block: TaskBlock) -> bool:
 
 def sort_timed_nodes(nodes: list) -> None:
     """Sort top-level TaskBlocks by start time in-place; untimed tasks follow timed."""
-    blocks = [n for n in nodes if isinstance(n, TaskBlock)]
+    blocks = [n for n in nodes if isinstance(n, TaskBlock) and not n.task.indent]
     timed = sorted([b for b in blocks if b.task.time],
                    key=lambda b: get_minutes(b.task.time.start))
     untimed = [b for b in blocks if not b.task.time]
     sorted_blocks = timed + untimed
     if sorted_blocks == blocks:
         return
-    block_positions = [i for i, n in enumerate(nodes) if isinstance(n, TaskBlock)]
+    block_positions = [i for i, n in enumerate(nodes) if isinstance(n, TaskBlock) and not n.task.indent]
     for pos, block in zip(block_positions, sorted_blocks):
         nodes[pos] = block
 

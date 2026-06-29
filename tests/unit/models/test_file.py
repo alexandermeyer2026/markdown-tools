@@ -8,7 +8,7 @@ from config import get_indent_step
 from models.task import Task, TaskTime
 from models.file import (
     RawLine, TaskBlock, parse, parse_lines, serialize, insert_task,
-    move_block_in_nodes, shift_tab_task, tab_task,
+    move_block_in_nodes, shift_tab_task, tab_task, sort_timed_nodes,
 )
 
 STEP = get_indent_step()
@@ -1004,6 +1004,107 @@ class TestMoveBlockInNodes(unittest.TestCase):
         nodes = [_make_block(t1), _make_block(u), _make_block(t2)]
         self.assertFalse(move_block_in_nodes(nodes, u, 1))
         self.assertFalse(move_block_in_nodes(nodes, u, -1))
+
+
+# ── sort_timed_nodes ──────────────────────────────────────────────────────────
+
+class TestSortTimedNodes(unittest.TestCase):
+
+    def _timed(self, title: str, start: str, indent: str = '') -> TaskBlock:
+        task = Task(title=title, status='todo',
+                    time=TaskTime(start=start), line_number=-1, indent=indent)
+        return _make_block(task)
+
+    def _untimed(self, title: str, indent: str = '') -> TaskBlock:
+        task = Task(title=title, status='todo', time=None, line_number=-1, indent=indent)
+        return _make_block(task)
+
+    def test_sorts_timed_by_start_time(self):
+        b1 = self._timed('A', '10:00')
+        b2 = self._timed('B', '09:00')
+        nodes = [b1, b2]
+        sort_timed_nodes(nodes)
+        self.assertEqual(nodes, [b2, b1])
+
+    def test_untimed_follow_timed(self):
+        t = self._timed('T', '09:00')
+        u = self._untimed('U')
+        nodes = [u, t]
+        sort_timed_nodes(nodes)
+        self.assertEqual(nodes, [t, u])
+
+    def test_noop_when_already_sorted(self):
+        b1 = self._timed('A', '09:00')
+        b2 = self._timed('B', '10:00')
+        nodes = [b1, b2]
+        sort_timed_nodes(nodes)
+        self.assertEqual(nodes, [b1, b2])
+
+    def test_rawlines_stay_at_their_positions(self):
+        sep = RawLine('\n')
+        b1 = self._timed('A', '10:00')
+        b2 = self._timed('B', '09:00')
+        nodes = [b1, sep, b2]
+        sort_timed_nodes(nodes)
+        self.assertIs(nodes[1], sep)
+        self.assertIs(nodes[0], b2)
+        self.assertIs(nodes[2], b1)
+
+    def test_orphaned_indented_prose_task_not_moved(self):
+        # Regression: a task-format line in the prose section (non-zero indent, no
+        # parent) lands at top-level during parsing. sort_timed_nodes must not move
+        # it — doing so would place a real task into the prose and make the orphaned
+        # task appear as a subtask of the last real task after a re-parse.
+        prose_raw = RawLine('Some notes\n')
+        orphaned = self._untimed('Prose Task', indent='    ')
+        t1 = self._timed('Task 1', '10:00')
+        t2 = self._timed('Task 2', '09:00')
+        nodes = [prose_raw, orphaned, t1, t2]
+        sort_timed_nodes(nodes)
+        self.assertIs(nodes[0], prose_raw)
+        self.assertIs(nodes[1], orphaned)   # must stay in prose position
+        self.assertIs(nodes[2], t2)         # sorted earlier start time first
+        self.assertIs(nodes[3], t1)
+
+    def test_orphaned_prose_task_does_not_prevent_sort(self):
+        # The real tasks must still be reordered even when an orphaned prose task exists.
+        orphaned = self._untimed('Prose Task', indent='    ')
+        t1 = self._timed('Task 1', '10:00')
+        t2 = self._timed('Task 2', '09:00')
+        nodes = [orphaned, t1, t2]
+        sort_timed_nodes(nodes)
+        self.assertIs(nodes[1], t2)
+        self.assertIs(nodes[2], t1)
+
+    def test_prose_file_round_trip_after_sort(self):
+        # Full round-trip: file with a checkbox-syntax line in prose (indented, no
+        # parent) survives a sort without corrupting the prose or task sections.
+        content = (
+            '# Monday\n'
+            '\n'
+            'Some notes\n'
+            '    - Bullet\n'
+            '        - [ ] Prose checkbox\n'
+            'More notes\n'
+            '\n'
+            '- [ ] 10:00 Task A\n'
+            '- [ ] 09:00 Task B\n'
+        )
+        nodes = parse_lines(content.splitlines(keepends=True))
+        sort_timed_nodes(nodes)
+        result = serialize(nodes)
+        expected = (
+            '# Monday\n'
+            '\n'
+            'Some notes\n'
+            '    - Bullet\n'
+            '        - [ ] Prose checkbox\n'
+            'More notes\n'
+            '\n'
+            '- [ ] 09:00 Task B\n'
+            '- [ ] 10:00 Task A\n'
+        )
+        self.assertEqual(result, expected)
 
 
 if __name__ == '__main__':
