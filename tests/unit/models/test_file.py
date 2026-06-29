@@ -1052,29 +1052,63 @@ class TestSortTimedNodes(unittest.TestCase):
 
     def test_orphaned_indented_prose_task_not_moved(self):
         # Regression: a task-format line in the prose section (non-zero indent, no
-        # parent) lands at top-level during parsing. sort_timed_nodes must not move
-        # it — doing so would place a real task into the prose and make the orphaned
-        # task appear as a subtask of the last real task after a re-parse.
+        # parent) lands at top-level during parsing. A non-blank prose RawLine follows
+        # it (matching what the parser produces), creating a group boundary.
+        # sort_timed_nodes must not move it — doing so would place a real task into
+        # the prose and make the orphaned task a subtask of the last real task on
+        # the next re-parse.
         prose_raw = RawLine('Some notes\n')
         orphaned = self._untimed('Prose Task', indent='    ')
+        more_prose = RawLine('More notes\n')   # group boundary
         t1 = self._timed('Task 1', '10:00')
         t2 = self._timed('Task 2', '09:00')
-        nodes = [prose_raw, orphaned, t1, t2]
+        nodes = [prose_raw, orphaned, more_prose, t1, t2]
         sort_timed_nodes(nodes)
         self.assertIs(nodes[0], prose_raw)
-        self.assertIs(nodes[1], orphaned)   # must stay in prose position
-        self.assertIs(nodes[2], t2)         # sorted earlier start time first
-        self.assertIs(nodes[3], t1)
+        self.assertIs(nodes[1], orphaned)   # must stay in prose group
+        self.assertIs(nodes[2], more_prose)
+        self.assertIs(nodes[3], t2)         # task group sorted correctly
+        self.assertIs(nodes[4], t1)
 
     def test_orphaned_prose_task_does_not_prevent_sort(self):
-        # The real tasks must still be reordered even when an orphaned prose task exists.
+        # Real tasks must still be reordered even when a prose group precedes them.
         orphaned = self._untimed('Prose Task', indent='    ')
+        prose = RawLine('More notes\n')    # group boundary
         t1 = self._timed('Task 1', '10:00')
         t2 = self._timed('Task 2', '09:00')
-        nodes = [orphaned, t1, t2]
+        nodes = [orphaned, prose, t1, t2]
         sort_timed_nodes(nodes)
-        self.assertIs(nodes[1], t2)
-        self.assertIs(nodes[2], t1)
+        self.assertIs(nodes[0], orphaned)  # stays in its (solo) group
+        self.assertIs(nodes[2], t2)        # task group sorted correctly
+        self.assertIs(nodes[3], t1)
+
+    def test_two_groups_sorted_independently(self):
+        # Both groups need reordering; they must not bleed into each other.
+        a = self._timed('A', '10:00')
+        b = self._timed('B', '09:00')
+        sep = RawLine('Some notes\n')
+        c = self._timed('C', '12:00')
+        d = self._timed('D', '11:00')
+        nodes = [a, b, sep, c, d]
+        sort_timed_nodes(nodes)
+        self.assertIs(nodes[0], b)
+        self.assertIs(nodes[1], a)
+        self.assertIs(nodes[2], sep)
+        self.assertIs(nodes[3], d)
+        self.assertIs(nodes[4], c)
+
+    def test_zero_indent_prose_task_not_moved(self):
+        # The adjacency rule also protects zero-indent tasks that logically belong
+        # to the prose section — the indent-based fix would miss these.
+        prose_task = self._timed('Prose timed task', '10:00')  # indent=0 but in prose
+        separator = RawLine('Some notes\n')
+        t1 = self._timed('Task A', '09:00')
+        t2 = self._timed('Task B', '11:00')
+        nodes = [prose_task, separator, t1, t2]
+        sort_timed_nodes(nodes)
+        self.assertIs(nodes[0], prose_task)  # prose group untouched
+        self.assertIs(nodes[2], t1)          # task group already sorted — no change
+        self.assertIs(nodes[3], t2)
 
     def test_prose_file_round_trip_after_sort(self):
         # Full round-trip: file with a checkbox-syntax line in prose (indented, no

@@ -361,17 +361,30 @@ def remove_block(nodes: list, block: TaskBlock) -> bool:
 
 
 def sort_timed_nodes(nodes: list) -> None:
-    """Sort top-level TaskBlocks by start time in-place; untimed tasks follow timed."""
-    blocks = [n for n in nodes if isinstance(n, TaskBlock) and not n.task.indent]
-    timed = sorted([b for b in blocks if b.task.time],
-                   key=lambda b: get_minutes(b.task.time.start))
-    untimed = [b for b in blocks if not b.task.time]
-    sorted_blocks = timed + untimed
-    if sorted_blocks == blocks:
-        return
-    block_positions = [i for i, n in enumerate(nodes) if isinstance(n, TaskBlock) and not n.task.indent]
-    for pos, block in zip(block_positions, sorted_blocks):
-        nodes[pos] = block
+    """Sort TaskBlocks by start time within contiguous groups; prose lines act as group
+    boundaries so tasks are never reordered across prose content."""
+    groups: list[list[tuple[int, TaskBlock]]] = []
+    current: list[tuple[int, TaskBlock]] = []
+    for i, node in enumerate(nodes):
+        if isinstance(node, TaskBlock):
+            current.append((i, node))
+        elif node.raw.strip():  # non-blank prose ends the current group
+            if current:
+                groups.append(current)
+                current = []
+    if current:
+        groups.append(current)
+
+    for group in groups:
+        blocks = [b for _, b in group]
+        timed = sorted([b for b in blocks if b.task.time],
+                       key=lambda b: get_minutes(b.task.time.start))
+        untimed = [b for b in blocks if not b.task.time]
+        sorted_blocks = timed + untimed
+        if sorted_blocks == blocks:
+            continue
+        for (pos, _), block in zip(group, sorted_blocks):
+            nodes[pos] = block
 
 
 def _find_path_for_task(nodes: list, task: Task) -> 'tuple[TaskBlock, list[tuple[list, int]]] | None':
