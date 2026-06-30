@@ -47,14 +47,6 @@ class CalendarWidget(Widget, can_focus=True):
         weeks = calendar.monthcalendar(today.year, today.month)
         self.selected_week = next((i for i, w in enumerate(weeks) if today.day in w), 0)
 
-    def on_focus(self) -> None:
-        collapsed = getattr(self.screen, '_collapsed', False)
-        c_hint = "[c] expand" if collapsed else "[c] collapse"
-        hints = f"[j/k] week · [h/l] month · [Enter] open · [Tab] switch · {c_hint} · [ctrl+r] refresh · [Esc] quit"
-        try:
-            self.screen.query_one("#hints", Static).update(Text(hints))
-        except Exception:
-            pass
 
     def _weeks(self) -> list[list[int]]:
         return calendar.monthcalendar(self._view_year, self._view_month)

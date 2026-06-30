@@ -40,13 +40,6 @@ class BlackboardWidget(VerticalScroll, can_focus=True):
     def reload(self) -> None:
         self.query_one("#blackboard-content", Static).update(self._read())
 
-    def on_focus(self) -> None:
-        collapsed = getattr(self.screen, '_collapsed', False)
-        c_hint = "[c] expand" if collapsed else "[c] collapse"
-        try:
-            self.screen.query_one("#hints", Static).update(Text(f"[Enter] edit · [Tab] switch · {c_hint} · [ctrl+r] refresh · [Esc] quit"))
-        except Exception:
-            pass
 
     def action_open_in_editor(self) -> None:
         with self.app.suspend():

@@ -166,14 +166,6 @@ class DayEntry(Widget, can_focus=True):
             yield TaskRowWidget(t)
             yield from self._subtask_statics(child_block, depth + 1)
 
-    def on_focus(self) -> None:
-        toggle_label = "expand" if self.collapsed else "collapse"
-        hints = f"[Enter] open day · [Tab] next day · [c] {toggle_label} · [ctrl+r] refresh · [Esc] quit"
-        try:
-            self.screen.query_one("#hints", Static).update(Text(hints))
-        except Exception:
-            pass
-
     def action_open_day(self) -> None:
         day_key = self._date.isoformat()
         cache = self._planner.load_day(self._date)

@@ -187,10 +187,30 @@ class DashboardScreen(Screen):
             DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory, self._collapsed),
         )
 
+    def _update_hints(self) -> None:
+        focused = self.focused
+        c_hint = "[c] expand" if self._collapsed else "[c] collapse"
+        if isinstance(focused, CalendarWidget):
+            hints = f"[j/k] week · [h/l] month · [Enter] open · [Tab] switch · {c_hint} · [ctrl+r] refresh · [Esc] quit"
+        elif isinstance(focused, BlackboardWidget):
+            hints = f"[Enter] edit · [Tab] switch · {c_hint} · [ctrl+r] refresh · [Esc] quit"
+        elif isinstance(focused, DayEntry):
+            hints = f"[Enter] open day · [Tab] next day · {c_hint} · [ctrl+r] refresh · [Esc] quit"
+        else:
+            return
+        try:
+            self.query_one("#hints", Static).update(Text(hints))
+        except Exception:
+            pass
+
+    def on_descendant_focus(self) -> None:
+        self._update_hints()
+
     def action_toggle_collapse(self) -> None:
         self._collapsed = not self._collapsed
         for entry in self.query(DayEntry):
             entry.collapsed = self._collapsed
+        self._update_hints()
 
     def action_refresh_data(self) -> None:
         self.reload_columns()
