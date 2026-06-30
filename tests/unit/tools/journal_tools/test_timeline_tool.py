@@ -170,11 +170,11 @@ class TestIntegrationHourStep(unittest.TestCase):
     EXPECTED_OUTPUT = (
         "    12    18    24\n"
         "────┼─────┼─────┤\n"
-        "█ ✓ 8:00-9:00 Morning routine\n"
-        " ██ ○ 9:00-10:30 Work on project\n"
-        "  █ ✓ 10:30-11:00 Coffee break\n"
-        "   █ ○ 11:00-12:00 Team meeting\n"
-        "      █ ○ 14:00 Review PRs\n"
+        "█ ✓ 8:00-9:00 Mornin\n"
+        " ██ ○ 9:00-10:30 Wor\n"
+        "  █ ✓ 10:30-11:00 Co\n"
+        "   █ ○ 11:00-12:00 T\n"
+        "      █ ○ 14:00 Revi\n"
     )
 
     def setUp(self):

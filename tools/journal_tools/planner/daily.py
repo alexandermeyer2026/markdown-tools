@@ -72,6 +72,7 @@ class DayGrid(Widget, can_focus=True):
         Binding("enter",  "edit_task",          show=False),
         Binding("n",      "new_task",           show=False),
         Binding("backspace", "delete_task",     show=False),
+        Binding("ctrl+r", "reload",              show=False),
         Binding("ctrl+s", "save",               show=False),
         Binding("ctrl+c","quit",          show=False),
         Binding("space",  "toggle_select", show=False),
@@ -189,11 +190,12 @@ class DayGrid(Widget, can_focus=True):
         lines.append(Text(""))
         hints = (
             "[j/k] move  [space] select  [h/l] shift  [H/L] end time  [r] remove time  "
-            "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [Esc] back"
+            "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [ctrl+r] reload  [Esc] back"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
-        return Group(*lines)
+        w = self.size.width
+        return Group(*[line[:w] for line in lines])
 
     def _timed_task_row(self, task: Task, selected: Task | None) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
@@ -547,6 +549,13 @@ class DayGrid(Widget, can_focus=True):
         self.app.push_screen(SaveDialog("Delete task?"), on_confirm)
 
     # ── Save / quit ───────────────────────────────────────────────────────────
+
+    def action_reload(self) -> None:
+        self._planner.reload_day_by_key(self._day_key)
+        self._day().checkpoint()
+        nav = self._navigable()
+        self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
+        self.refresh()
 
     def action_save(self) -> None:
         if not self._has_changes():

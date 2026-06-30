@@ -9,7 +9,7 @@ from models import get_minutes
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,
     get_time_slot, scale_lines, body_rows, subtask_rows,
-    insert_now_marker,
+    insert_now_marker, ansi_truncate,
 )
 
 _STEP_SIZES = [0.25, 0.5, 1]
@@ -146,4 +146,4 @@ class TimelineTool:
         except (OSError, AttributeError):
             width = 80
         for line in TimelineTool.render_timeline_lines(blocks, date, width):
-            print(line)
+            print(ansi_truncate(line, width))

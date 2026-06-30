@@ -138,6 +138,7 @@ class WeekGrid(Widget, can_focus=True):
         Binding("enter",  "open_or_edit",       show=False),
         Binding("n",      "new_task",           show=False),
         Binding("backspace", "delete_task",     show=False),
+        Binding("ctrl+r", "reload",              show=False),
         Binding("ctrl+s", "save",               show=False),
         Binding("ctrl+c","quit",              show=False),
         Binding("space",  "toggle_select",    show=False),
@@ -232,11 +233,12 @@ class WeekGrid(Widget, can_focus=True):
         lines.append(Text(""))
         hints = (
             "[h/j/k/l] navigate  [space] select  [H/L] move  [>] carry  "
-            "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [Esc] quit"
+            "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [ctrl+r] reload  [Esc] quit"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
-        return Group(*lines)
+        w = self.size.width
+        return Group(*[line[:w] for line in lines])
 
     def _week_cell(self, task: Task, depth: int, col_width: int, is_selected: bool, is_in_sel: bool = False) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
@@ -640,6 +642,15 @@ class WeekGrid(Widget, can_focus=True):
             self.refresh()
 
         self.app.push_screen(TaskFormScreen(), on_form_result)
+
+    def action_reload(self) -> None:
+        if self._state is None:
+            return
+        for day in self._state.week_days:
+            self._planner.reload_day_by_key(day.isoformat())
+        self._state = WeekState(week_days=self._state.week_days, planner=self._planner)
+        self._clamp_row()
+        self.refresh()
 
     def action_save(self) -> None:
         if not cache_has_changes(self._planner.days):

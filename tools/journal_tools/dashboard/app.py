@@ -111,7 +111,7 @@ class DashboardScreen(Screen):
     BINDINGS = [
         Binding("escape", "quit", show=False),
         Binding("ctrl+c", "quit", show=False),
-        Binding("r", "refresh_data", "Refresh", show=True),
+        Binding("ctrl+r", "refresh_data", "Refresh", show=True),
     ]
 
     def __init__(

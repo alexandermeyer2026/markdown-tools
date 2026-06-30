@@ -10,7 +10,7 @@ from rich.console import Group
 
 from models.file import TaskBlock
 from os_utils import FileWriter
-from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
+from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES, ansi_truncate
 from models import get_minutes
 from tools.journal_tools.planner.state import PlannerState
 
@@ -29,13 +29,30 @@ class TimelineWidget(Widget):
 
     def _timeline_lines(self, width: int) -> list[str]:
         from tools.journal_tools.timeline_tool import TimelineTool
-        return TimelineTool.render_timeline_lines(self._blocks, self._date, max(20, width))
+        lines = TimelineTool.render_timeline_lines(self._blocks, self._date, max(20, width))
+        return [ansi_truncate(line, width) for line in lines]
 
     def get_content_height(self, container, viewport, width: int) -> int:
         return len(self._timeline_lines(width))
 
     def render(self) -> Text:
         return Text.from_ansi('\n'.join(self._timeline_lines(self.size.width)))
+
+
+class TaskRowWidget(Widget):
+    DEFAULT_CSS = """
+    TaskRowWidget {
+        height: 1;
+        width: 1fr;
+    }
+    """
+
+    def __init__(self, text: Text) -> None:
+        super().__init__()
+        self._text = text
+
+    def render(self) -> Text:
+        return self._text[:self.size.width]
 
 
 class ColumnHeader(Widget):
@@ -65,16 +82,11 @@ class DayEntry(Widget, can_focus=True):
         height: auto;
         border: blank;
         padding: 0 1;
-
     }
     DayEntry:focus {
         border: solid $warning;
     }
-    Static {
-        height: auto;
-        width: 1fr;
-    }
-    """
+"""
 
     BINDINGS = [Binding("enter", "open_day", show=False)]
 
@@ -104,7 +116,7 @@ class DayEntry(Widget, can_focus=True):
             return self._date.strftime('%A, %-d %b')
 
     def compose(self) -> ComposeResult:
-        yield Static(Text(self._date_label(), style="bold"))
+        yield TaskRowWidget(Text(self._date_label(), style="bold"))
 
         today    = datetime.date.today()
         tomorrow = today + datetime.timedelta(days=1)
@@ -122,7 +134,7 @@ class DayEntry(Widget, can_focus=True):
                 t = Text("  ")
                 t.append(icon, style=style)
                 t.append(f"  {task.time.to_str()}  {task.title}")
-                yield Static(t)
+                yield TaskRowWidget(t)
                 yield from self._subtask_statics(block)
 
         for block in untimed:
@@ -132,7 +144,7 @@ class DayEntry(Widget, can_focus=True):
             t = Text("  ")
             t.append(icon, style=style)
             t.append(f"  {task.title}")
-            yield Static(t)
+            yield TaskRowWidget(t)
             yield from self._subtask_statics(block)
 
     def _subtask_statics(self, block: TaskBlock, depth: int = 1):
@@ -143,11 +155,11 @@ class DayEntry(Widget, can_focus=True):
             t = Text(f"  {'  ' * depth}")
             t.append(icon, style=style)
             t.append(f"  {child.title}")
-            yield Static(t)
+            yield TaskRowWidget(t)
             yield from self._subtask_statics(child_block, depth + 1)
 
     def on_focus(self) -> None:
-        hints = "[Enter] open day · [Tab] next day · [r] refresh · [Esc] quit"
+        hints = "[Enter] open day · [Tab] next day · [ctrl+r] refresh · [Esc] quit"
         try:
             self.screen.query_one("#hints", Static).update(Text(hints))
         except Exception:

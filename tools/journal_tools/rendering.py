@@ -152,3 +152,21 @@ def ansi_truncate_pad(line: str, cols: int) -> str:
             break
     out.append(RESET + ' ' * (cols - visible))
     return ''.join(out)
+
+
+def ansi_truncate(line: str, cols: int) -> str:
+    out, visible = [], 0
+    i = 0
+    while i < len(line):
+        m = _ANSI_RE.match(line, i)
+        if m:
+            out.append(m.group())
+            i = m.end()
+        elif visible < cols:
+            out.append(line[i])
+            visible += 1
+            i += 1
+        else:
+            out.append(RESET)
+            break
+    return ''.join(out)
