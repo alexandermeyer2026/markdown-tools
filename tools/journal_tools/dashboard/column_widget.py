@@ -4,6 +4,7 @@ import os
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Rule, Static
 from rich.console import Group
@@ -91,6 +92,8 @@ class DayEntry(Widget, can_focus=True):
 
     BINDINGS = [Binding("enter", "open_day", show=False)]
 
+    collapsed: reactive[bool] = reactive(False, recompose=True)
+
     def __init__(
         self,
         date: datetime.date,
@@ -106,7 +109,7 @@ class DayEntry(Widget, can_focus=True):
         self._blocks = blocks
         self._planner = planner
         self._directory = directory
-        self._collapsed = collapsed
+        self.collapsed = collapsed
 
     def _date_label(self) -> str:
         today = datetime.date.today()
@@ -128,7 +131,7 @@ class DayEntry(Widget, can_focus=True):
         untimed  = [b for b in self._blocks if not b.task.time]
 
         if timed and self._date in (today, tomorrow):
-            yield TimelineWidget(timed, self._date, self._collapsed)
+            yield TimelineWidget(timed, self._date, self.collapsed)
         else:
             for block in timed:
                 task  = block.task
@@ -138,7 +141,7 @@ class DayEntry(Widget, can_focus=True):
                 t.append(icon, style=style)
                 t.append(f"  {task.time.to_str()}  {task.title}")
                 yield TaskRowWidget(t)
-                if not self._collapsed:
+                if not self.collapsed:
                     yield from self._subtask_statics(block)
 
         for block in untimed:
@@ -149,7 +152,7 @@ class DayEntry(Widget, can_focus=True):
             t.append(icon, style=style)
             t.append(f"  {task.title}")
             yield TaskRowWidget(t)
-            if not self._collapsed:
+            if not self.collapsed:
                 yield from self._subtask_statics(block)
 
     def _subtask_statics(self, block: TaskBlock, depth: int = 1):
@@ -164,7 +167,7 @@ class DayEntry(Widget, can_focus=True):
             yield from self._subtask_statics(child_block, depth + 1)
 
     def on_focus(self) -> None:
-        toggle_label = "expand" if self._collapsed else "collapse"
+        toggle_label = "expand" if self.collapsed else "collapse"
         hints = f"[Enter] open day · [Tab] next day · [c] {toggle_label} · [ctrl+r] refresh · [Esc] quit"
         try:
             self.screen.query_one("#hints", Static).update(Text(hints))

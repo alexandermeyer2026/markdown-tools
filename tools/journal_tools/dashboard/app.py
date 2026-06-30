@@ -15,7 +15,7 @@ from models.file import TaskBlock, parse
 from tools.journal_tools.planner.state import PlannerState
 from .blackboard_widget import BlackboardWidget
 from .calendar_widget import CalendarWidget
-from .column_widget import DayListColumn
+from .column_widget import DayEntry, DayListColumn
 
 _OVERDUE_DAYS  = 14
 _UPCOMING_DAYS = 7
@@ -188,23 +188,9 @@ class DashboardScreen(Screen):
         )
 
     def action_toggle_collapse(self) -> None:
-        prev_focused = self.focused
         self._collapsed = not self._collapsed
-        self.reload_columns()
-
-        def _restore_hint() -> None:
-            try:
-                if prev_focused is not None:
-                    prev_focused.focus()
-                    return
-            except Exception:
-                pass
-            try:
-                self.query_one(CalendarWidget).focus()
-            except Exception:
-                pass
-
-        self.call_after_refresh(_restore_hint)
+        for entry in self.query(DayEntry):
+            entry.collapsed = self._collapsed
 
     def action_refresh_data(self) -> None:
         self.reload_columns()
