@@ -83,6 +83,9 @@ Tools are designed to work independently:
 | `journal dashboard` | Dashboard overview of open and upcoming tasks |
 | `journal time-machine <file>` | Browse and restore previous versions of a file |
 | `journal sync` | Push and pull files to a self-hosted server |
+| `journal notion-export` | Export journal entries to Notion |
+| `journal notion-import` | Import entries from Notion |
+| `journal ics-export` | Export tasks as an ICS calendar file |
 
 ## Project Structure
 
@@ -91,10 +94,12 @@ markdown-tools/
 ├── main.py                 # Main entry point and CLI
 ├── config/                 # YAML configuration (task patterns, etc.)
 ├── models/                 # Data models
-├── parser/                 # Markdown parsing utilities
-├── os_utils/               # File system utilities
+├── os_utils/               # File system and date utilities
 ├── tools/                  # Tool implementations
-│   └── journal_tools/      # Journal tools (timeline, catch-up, planner, dashboard)
+│   └── journal_tools/      # Journal tools
+│       ├── planner/        # Interactive planner (Textual TUI)
+│       └── dashboard/      # Dashboard overview (Textual TUI)
+├── tests/                  # Unit and end-to-end tests
 └── webapp/                 # Optional self-hosted web interface
     ├── backend/            # FastAPI backend
     ├── frontend/           # React frontend
