@@ -57,7 +57,7 @@ class TimelineTool:
     def _step_size_for_width(first_task_minutes: int, width: int) -> float:
         for step in _STEP_SIZES:
             first_slot = get_time_slot(first_task_minutes, step)
-            if int(24 / step) - first_slot <= width:
+            if int(24 / step) - first_slot + 2 <= width:
                 return step
         return _STEP_SIZES[-1]
 

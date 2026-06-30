@@ -15,6 +15,29 @@ from models import get_minutes
 from tools.journal_tools.planner.state import PlannerState
 
 
+class TimelineWidget(Widget):
+    DEFAULT_CSS = """
+    TimelineWidget {
+        height: auto;
+    }
+    """
+
+    def __init__(self, blocks: list, date: datetime.date) -> None:
+        super().__init__()
+        self._blocks = blocks
+        self._date = date
+
+    def _timeline_lines(self, width: int) -> list[str]:
+        from tools.journal_tools.timeline_tool import TimelineTool
+        return TimelineTool.render_timeline_lines(self._blocks, self._date, max(20, width))
+
+    def get_content_height(self, container, viewport, width: int) -> int:
+        return len(self._timeline_lines(width))
+
+    def render(self) -> Text:
+        return Text.from_ansi('\n'.join(self._timeline_lines(self.size.width)))
+
+
 class ColumnHeader(Widget):
     DEFAULT_CSS = """
     ColumnHeader {
@@ -90,10 +113,7 @@ class DayEntry(Widget, can_focus=True):
         untimed  = [b for b in self._blocks if not b.task.time]
 
         if timed and self._date in (today, tomorrow):
-            from tools.journal_tools.timeline_tool import TimelineTool
-            width = max(20, self.app.size.width // 3 - 4)
-            for line in TimelineTool.render_timeline_lines(timed, self._date, width):
-                yield Static(Text.from_ansi(line))
+            yield TimelineWidget(timed, self._date)
         else:
             for block in timed:
                 task  = block.task
