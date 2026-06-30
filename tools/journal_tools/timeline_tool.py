@@ -96,7 +96,7 @@ class TimelineTool:
         return (start_slot - first_task_slot) + bar_width + 1
 
     @staticmethod
-    def render_timeline_lines(blocks: list, date: datetime.date, width: int) -> list[str]:
+    def render_timeline_lines(blocks: list, date: datetime.date, width: int, collapsed: bool = False) -> list[str]:
         timed_blocks = [b for b in blocks if b.task.time and b.task.time.start]
         timed_blocks.sort(key=lambda b: get_minutes(b.task.time.start))
 
@@ -127,15 +127,17 @@ class TimelineTool:
             task = block.task
             icon_col = TimelineTool._icon_col(task, step, first_task_slot)
             task_line = TimelineTool.render_task(task, step, first_task_slot, now_marker_slot)
-            task_body = body_rows(block, left_pad=icon_col)
-            task_subtasks = subtask_rows(block, left_pad=icon_col)
             if now_col is not None:
                 task_line = insert_now_marker(task_line, now_col)
-                task_body = [insert_now_marker(l, now_col) for l in task_body]
-                task_subtasks = [insert_now_marker(l, now_col) for l in task_subtasks]
             lines.append(task_line)
-            lines.extend(task_body)
-            lines.extend(task_subtasks)
+            if not collapsed:
+                task_body = body_rows(block, left_pad=icon_col)
+                task_subtasks = subtask_rows(block, left_pad=icon_col)
+                if now_col is not None:
+                    task_body = [insert_now_marker(l, now_col) for l in task_body]
+                    task_subtasks = [insert_now_marker(l, now_col) for l in task_subtasks]
+                lines.extend(task_body)
+                lines.extend(task_subtasks)
 
         return lines
 

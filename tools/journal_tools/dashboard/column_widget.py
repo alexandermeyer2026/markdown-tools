@@ -22,14 +22,15 @@ class TimelineWidget(Widget):
     }
     """
 
-    def __init__(self, blocks: list, date: datetime.date) -> None:
+    def __init__(self, blocks: list, date: datetime.date, collapsed: bool = False) -> None:
         super().__init__()
         self._blocks = blocks
         self._date = date
+        self._collapsed = collapsed
 
     def _timeline_lines(self, width: int) -> list[str]:
         from tools.journal_tools.timeline_tool import TimelineTool
-        lines = TimelineTool.render_timeline_lines(self._blocks, self._date, max(20, width))
+        lines = TimelineTool.render_timeline_lines(self._blocks, self._date, max(20, width), self._collapsed)
         return [ansi_truncate(line, width) for line in lines]
 
     def get_content_height(self, container, viewport, width: int) -> int:
@@ -97,6 +98,7 @@ class DayEntry(Widget, can_focus=True):
         blocks: list,
         planner: PlannerState,
         directory: str,
+        collapsed: bool = False,
     ) -> None:
         super().__init__()
         self._date = date
@@ -104,6 +106,7 @@ class DayEntry(Widget, can_focus=True):
         self._blocks = blocks
         self._planner = planner
         self._directory = directory
+        self._collapsed = collapsed
 
     def _date_label(self) -> str:
         today = datetime.date.today()
@@ -125,7 +128,7 @@ class DayEntry(Widget, can_focus=True):
         untimed  = [b for b in self._blocks if not b.task.time]
 
         if timed and self._date in (today, tomorrow):
-            yield TimelineWidget(timed, self._date)
+            yield TimelineWidget(timed, self._date, self._collapsed)
         else:
             for block in timed:
                 task  = block.task
@@ -135,7 +138,8 @@ class DayEntry(Widget, can_focus=True):
                 t.append(icon, style=style)
                 t.append(f"  {task.time.to_str()}  {task.title}")
                 yield TaskRowWidget(t)
-                yield from self._subtask_statics(block)
+                if not self._collapsed:
+                    yield from self._subtask_statics(block)
 
         for block in untimed:
             task  = block.task
@@ -145,7 +149,8 @@ class DayEntry(Widget, can_focus=True):
             t.append(icon, style=style)
             t.append(f"  {task.title}")
             yield TaskRowWidget(t)
-            yield from self._subtask_statics(block)
+            if not self._collapsed:
+                yield from self._subtask_statics(block)
 
     def _subtask_statics(self, block: TaskBlock, depth: int = 1):
         for child_block in [n for n in block.nodes if isinstance(n, TaskBlock)]:
@@ -159,7 +164,8 @@ class DayEntry(Widget, can_focus=True):
             yield from self._subtask_statics(child_block, depth + 1)
 
     def on_focus(self) -> None:
-        hints = "[Enter] open day · [Tab] next day · [ctrl+r] refresh · [Esc] quit"
+        toggle_label = "expand" if self._collapsed else "collapse"
+        hints = f"[Enter] open day · [Tab] next day · [c] {toggle_label} · [ctrl+r] refresh · [Esc] quit"
         try:
             self.screen.query_one("#hints", Static).update(Text(hints))
         except Exception:
@@ -205,12 +211,14 @@ class DayListColumn(Widget):
         entries: list,
         planner: PlannerState,
         directory: str,
+        collapsed: bool = False,
     ) -> None:
         super().__init__()
         self._title = title
         self._entries = entries
         self._planner = planner
         self._directory = directory
+        self._collapsed = collapsed
 
     def compose(self) -> ComposeResult:
         total = sum(len(blocks) for _, _, blocks in self._entries)
@@ -221,4 +229,4 @@ class DayListColumn(Widget):
             yield Static(Text("  –", style="bright_black"))
         else:
             for date, fp, blocks in self._entries:
-                yield DayEntry(date, fp, blocks, self._planner, self._directory)
+                yield DayEntry(date, fp, blocks, self._planner, self._directory, self._collapsed)

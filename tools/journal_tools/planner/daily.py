@@ -77,6 +77,7 @@ class DayGrid(Widget, can_focus=True):
         Binding("ctrl+c","quit",          show=False),
         Binding("space",  "toggle_select", show=False),
         Binding("escape", "escape",        show=False),
+        Binding("c",      "toggle_collapse", show=False),
     ]
 
     cursor_idx: reactive[int] = reactive(0, repaint=True)
@@ -95,6 +96,7 @@ class DayGrid(Widget, can_focus=True):
         self._date = date
         self._day_key: str | None = None
         self._multiselect: list[Task] = []
+        self._collapsed = False
 
     def on_mount(self) -> None:
         self._day_key, _ = self._planner.load_file(self._file_path, self._date)
@@ -158,15 +160,17 @@ class DayGrid(Widget, can_focus=True):
                 bar_width = max(end_slot - start_slot + 1, 1)
                 icon_col = start_slot + bar_width + len(task.time.to_str()) + 2
                 task_row = self._timed_task_row(task, selected)
-                task_body = self._body_rows(block, time_offset=icon_col)
-                task_subs = self._subtask_rows(block, selected, time_offset=icon_col)
                 if now_slot is not None:
                     task_row = self._insert_now_col(task_row, now_col)
-                    task_body = [self._insert_now_col(l, now_col) for l in task_body]
-                    task_subs = [self._insert_now_col(l, now_col) for l in task_subs]
                 lines.append(task_row)
-                lines.extend(task_body)
-                lines.extend(task_subs)
+                if not self._collapsed:
+                    task_body = self._body_rows(block, time_offset=icon_col)
+                    task_subs = self._subtask_rows(block, selected, time_offset=icon_col)
+                    if now_slot is not None:
+                        task_body = [self._insert_now_col(l, now_col) for l in task_body]
+                        task_subs = [self._insert_now_col(l, now_col) for l in task_subs]
+                    lines.extend(task_body)
+                    lines.extend(task_subs)
         else:
             lines.append(Text.assemble(_MARGIN, ("No timed tasks yet", "bright_black")))
 
@@ -178,8 +182,9 @@ class DayGrid(Widget, can_focus=True):
             for block in untimed:
                 task = block.task
                 lines.append(self._untimed_task_row(task, selected))
-                lines.extend(self._body_rows(block))
-                lines.extend(self._subtask_rows(block, selected))
+                if not self._collapsed:
+                    lines.extend(self._body_rows(block))
+                    lines.extend(self._subtask_rows(block, selected))
 
         if not timed and not untimed:
             lines.append(Text(""))
@@ -188,9 +193,10 @@ class DayGrid(Widget, can_focus=True):
             )
 
         lines.append(Text(""))
+        c_hint = "[c] expand" if self._collapsed else "[c] collapse"
         hints = (
-            "[j/k] move  [space] select  [h/l] shift  [H/L] end time  [r] remove time  "
-            "[n] new  [Enter] edit  [t/i/s/d/f] status  [ctrl+s] save  [ctrl+r] reload  [Esc] back"
+            f"[j/k] move  [space] select  [h/l] shift  [H/L] end time  [r] remove time  "
+            f"[n] new  [Enter] edit  [t/i/s/d/f] status  {c_hint}  [ctrl+s] save  [ctrl+r] reload  [Esc] back"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -299,7 +305,10 @@ class DayGrid(Widget, can_focus=True):
         return Text.assemble(t[:col], Text("│", style="bright_black"), t[col + 1:])
 
     def _navigable(self) -> list[Task]:
-        return flatten_tasks(self._timed_tasks + self._untimed_tasks)
+        blocks = self._timed_tasks + self._untimed_tasks
+        if self._collapsed:
+            return [b.task for b in blocks]
+        return flatten_tasks(blocks)
 
     def _selected(self) -> Task | None:
         nav = self._navigable()
@@ -342,6 +351,12 @@ class DayGrid(Widget, can_focus=True):
             self.action_clear_select()
         else:
             self.action_quit()
+
+    def action_toggle_collapse(self) -> None:
+        self._collapsed = not self._collapsed
+        nav = self._navigable()
+        self.cursor_idx = min(self.cursor_idx, max(len(nav) - 1, 0))
+        self.refresh()
 
     def _do_save(self) -> None:
         save(self._day(), self._directory)

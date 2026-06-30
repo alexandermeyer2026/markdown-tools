@@ -112,6 +112,7 @@ class DashboardScreen(Screen):
         Binding("escape", "quit", show=False),
         Binding("ctrl+c", "quit", show=False),
         Binding("ctrl+r", "refresh_data", "Refresh", show=True),
+        Binding("c", "toggle_collapse", show=False),
     ]
 
     def __init__(
@@ -130,6 +131,7 @@ class DashboardScreen(Screen):
         self._today = today_entries
         self._upcoming = upcoming_entries
         self._desk_path = desk_path
+        self._collapsed = False
 
     def compose(self) -> ComposeResult:
         today = datetime.date.today()
@@ -141,11 +143,11 @@ class DashboardScreen(Screen):
             yield CalendarWidget(self._planner, self._directory)
             yield BlackboardWidget(self._desk_path)
         with Horizontal(id="columns"):
-            yield DayListColumn("Overdue",  self._overdue,   self._planner, self._directory)
+            yield DayListColumn("Overdue",  self._overdue,   self._planner, self._directory, self._collapsed)
             yield Rule(orientation="vertical")
-            yield DayListColumn("Today",    self._today,     self._planner, self._directory)
+            yield DayListColumn("Today",    self._today,     self._planner, self._directory, self._collapsed)
             yield Rule(orientation="vertical")
-            yield DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory)
+            yield DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory, self._collapsed)
         yield Static("", id="hints")
 
     def on_mount(self) -> None:
@@ -178,12 +180,31 @@ class DashboardScreen(Screen):
         columns = self.query_one("#columns")
         columns.remove_children()
         columns.mount(
-            DayListColumn("Overdue",  self._overdue,   self._planner, self._directory),
+            DayListColumn("Overdue",  self._overdue,   self._planner, self._directory, self._collapsed),
             Rule(orientation="vertical"),
-            DayListColumn("Today",    self._today,     self._planner, self._directory),
+            DayListColumn("Today",    self._today,     self._planner, self._directory, self._collapsed),
             Rule(orientation="vertical"),
-            DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory),
+            DayListColumn("Upcoming", self._upcoming,  self._planner, self._directory, self._collapsed),
         )
+
+    def action_toggle_collapse(self) -> None:
+        prev_focused = self.focused
+        self._collapsed = not self._collapsed
+        self.reload_columns()
+
+        def _restore_hint() -> None:
+            try:
+                if prev_focused is not None:
+                    prev_focused.focus()
+                    return
+            except Exception:
+                pass
+            try:
+                self.query_one(CalendarWidget).focus()
+            except Exception:
+                pass
+
+        self.call_after_refresh(_restore_hint)
 
     def action_refresh_data(self) -> None:
         self.reload_columns()

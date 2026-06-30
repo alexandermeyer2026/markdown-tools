@@ -61,14 +61,15 @@ def move_task_week(state: WeekState, src_col: int, dst_col: int, cursor_row: int
     return len(dst_cache.task_list) - 1
 
 
-def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: int) -> tuple[int, int, int]:
+def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: int, collapsed: bool = False) -> tuple[int, int, int]:
     """Move the task under the cursor left (direction=-1) or right (+1).
 
     Returns (new_col, new_row, week_exit) where week_exit is 0 while still in
     the current week, or ±1 when the task crosses into an adjacent week.
     """
     task_blocks = state.day(cursor_col).task_list
-    exp = week_expanded(task_blocks)
+    full_exp = week_expanded(task_blocks)
+    exp = [(t, d) for t, d in full_exp if d == 0] if collapsed else full_exp
     if cursor_row >= len(exp):
         return cursor_col, cursor_row, 0
     # Find depth-0 ancestor of the cursor position
@@ -81,7 +82,8 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
     dst_col = cursor_col + direction
     if 0 <= dst_col <= 6:
         move_task_week(state, cursor_col, dst_col, root_idx)
-        new_exp = week_expanded(state.day(dst_col).task_list)
+        new_full_exp = week_expanded(state.day(dst_col).task_list)
+        new_exp = [(t, d) for t, d in new_full_exp if d == 0] if collapsed else new_full_exp
         new_row = next((i for i, (t, _d) in enumerate(new_exp) if t is root_task_obj), 0)
         return dst_col, new_row, 0
     else:
@@ -93,6 +95,8 @@ def shift_task(state: WeekState, cursor_col: int, cursor_row: int, direction: in
         src_cache.remove_block(root_block)
         adj_cache.add_block(root_block)
         adj_exp = week_expanded(adj_cache.task_list)
+        if collapsed:
+            adj_exp = [(t, d) for t, d in adj_exp if d == 0]
         new_row = next((i for i, (t, _d) in enumerate(adj_exp) if t is root_task_obj), len(adj_exp) - 1)
         return cursor_col, new_row, direction
 
@@ -143,6 +147,7 @@ class WeekGrid(Widget, can_focus=True):
         Binding("ctrl+c","quit",              show=False),
         Binding("space",  "toggle_select",    show=False),
         Binding("escape", "escape",           show=False),
+        Binding("c",      "toggle_collapse",  show=False),
     ]
 
     cursor_col: reactive[int] = reactive(0, repaint=True)
@@ -155,6 +160,7 @@ class WeekGrid(Widget, can_focus=True):
         self._week_offset = week_offset
         self._state: WeekState | None = None
         self._multiselect: list[tuple[str, Task]] = []
+        self._collapsed = False
 
     def on_mount(self) -> None:
         self._load_week()
@@ -172,6 +178,13 @@ class WeekGrid(Widget, can_focus=True):
             self._planner.load_day(day)
         self._state = WeekState(week_days=week_days, planner=self._planner)
         self.refresh()
+
+    def _week_expanded(self, col: int) -> list[tuple]:
+        assert self._state is not None
+        exp = week_expanded(self._state.day(col).task_list)
+        if self._collapsed:
+            return [(t, d) for t, d in exp if d == 0]
+        return exp
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -210,7 +223,7 @@ class WeekGrid(Widget, can_focus=True):
         lines.append(Text(_MARGIN + ("─" * (col_width - 1) + " ") * 7))
 
         # Task rows — week_expanded returns list[tuple[Task, int]]
-        expanded = [week_expanded(state.day(i).task_list) for i in range(7)]
+        expanded = [self._week_expanded(i) for i in range(7)]
         max_rows = max((len(e) for e in expanded), default=0)
         max_rows = max(max_rows, 1)
 
@@ -231,9 +244,10 @@ class WeekGrid(Widget, can_focus=True):
             lines.append(line)
 
         lines.append(Text(""))
+        c_hint = "[c] expand" if self._collapsed else "[c] collapse"
         hints = (
-            "[h/j/k/l] navigate  [space] select  [H/L] move  [>] carry  "
-            "[t/i/s/d/f] status  [Enter] open/edit  [n] new  [ctrl+s] save  [ctrl+r] reload  [Esc] quit"
+            f"[h/j/k/l] navigate  [space] select  [H/L] move  [>] carry  "
+            f"[t/i/s/d/f] status  {c_hint}  [Enter] open/edit  [n] new  [ctrl+s] save  [ctrl+r] reload  [Esc] quit"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -273,7 +287,7 @@ class WeekGrid(Widget, can_focus=True):
     def _selected_task(self) -> Task | None:
         if self._state is None or self.cursor_row < 0:
             return None
-        exp = week_expanded(self._state.day(self.cursor_col).task_list)
+        exp = self._week_expanded(self.cursor_col)
         if self.cursor_row < len(exp):
             return exp[self.cursor_row][0]
         return None
@@ -285,7 +299,7 @@ class WeekGrid(Widget, can_focus=True):
     def _clamp_row(self) -> None:
         if self._state is None:
             return
-        exp = week_expanded(self._state.day(self.cursor_col).task_list)
+        exp = self._week_expanded(self.cursor_col)
         if self.cursor_row >= len(exp):
             self.cursor_row = max(len(exp) - 1, -1)
 
@@ -322,6 +336,11 @@ class WeekGrid(Widget, can_focus=True):
             self.action_clear_select()
         else:
             self.action_quit()
+
+    def action_toggle_collapse(self) -> None:
+        self._collapsed = not self._collapsed
+        self._clamp_row()
+        self.refresh()
 
     def _move_task_to_adj_day(self, day_key: str, task: Task, direction: int) -> str:
         if task.indent:
@@ -376,7 +395,7 @@ class WeekGrid(Widget, can_focus=True):
                 )
             if dst_col is not None:
                 self.cursor_col = dst_col
-                exp = week_expanded(self._state.day(dst_col).task_list)
+                exp = self._week_expanded(dst_col)
                 self.cursor_row = next(
                     (i for i, (t, _) in enumerate(exp) if t is cursor_task), 0
                 )
@@ -393,7 +412,7 @@ class WeekGrid(Widget, can_focus=True):
         if self.cursor_row == -1:
             self.cursor_row = 0
         else:
-            exp = week_expanded(self._state.day(self.cursor_col).task_list)
+            exp = self._week_expanded(self.cursor_col)
             if exp:
                 self.cursor_row = min(self.cursor_row + 1, len(exp) - 1)
 
@@ -444,7 +463,7 @@ class WeekGrid(Widget, can_focus=True):
         if self._state is None or self.cursor_row < 0:
             return
         new_col, new_row, week_exit = shift_task(
-            self._state, self.cursor_col, self.cursor_row, -1
+            self._state, self.cursor_col, self.cursor_row, -1, self._collapsed
         )
         if week_exit:
             self._week_offset += week_exit
@@ -462,7 +481,7 @@ class WeekGrid(Widget, can_focus=True):
         if self._state is None or self.cursor_row < 0:
             return
         new_col, new_row, week_exit = shift_task(
-            self._state, self.cursor_col, self.cursor_row, 1
+            self._state, self.cursor_col, self.cursor_row, 1, self._collapsed
         )
         if week_exit:
             self._week_offset += week_exit
@@ -481,6 +500,8 @@ class WeekGrid(Widget, can_focus=True):
             return
         if fn(task):
             exp = week_expanded(day_cache.task_list)
+            if self._collapsed:
+                exp = [(t, d) for t, d in exp if d == 0]
             self.cursor_row = next(
                 (i for i, (t, _) in enumerate(exp) if t is task), self.cursor_row
             )
@@ -513,7 +534,7 @@ class WeekGrid(Widget, can_focus=True):
     def action_carry_subtasks(self) -> None:
         if self._state is None or self.cursor_row < 0:
             return
-        exp = week_expanded(self._state.day(self.cursor_col).task_list)
+        exp = self._week_expanded(self.cursor_col)
         if self.cursor_row >= len(exp):
             return
         task, depth = exp[self.cursor_row]
