@@ -37,14 +37,39 @@ def _parse_time(t: str) -> datetime.time:
     return datetime.time(int(h), int(m))
 
 
-def _make_uid(date: str, idx: int) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f'journal:{date}:{idx}'))
+def _make_uid(date: str, title: str, time_start: str, occurrence: int = 0) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f'journal:{date}:{title}:{time_start}:{occurrence}'))
 
 
-def _task_to_vevent_lines(task, date: datetime.date, idx: int) -> list[str]:
+def _fold_line(line: str) -> str:
+    # RFC 5545 §3.1: lines must not exceed 75 octets (excluding CRLF)
+    encoded = line.encode('utf-8')
+    if len(encoded) <= 75:
+        return line
+    chunks = []
+    pos = 0
+    limit = 75
+    while pos < len(encoded):
+        end = min(pos + limit, len(encoded))
+        while end > pos and end < len(encoded) and (encoded[end] & 0xC0) == 0x80:
+            end -= 1
+        if end == pos:
+            end = pos + 1
+        chunks.append(encoded[pos:end].decode('utf-8'))
+        pos = end
+        limit = 74  # continuation lines begin with a leading space (1 octet)
+    return '\r\n '.join(chunks)
+
+
+def _task_to_vevent_lines(task, date: datetime.date, seen: dict) -> list[str]:
+    time_start = task.time.start if task.time else ''
+    uid_key = (date.isoformat(), task.title, time_start)
+    occurrence = seen.get(uid_key, 0)
+    seen[uid_key] = occurrence + 1
+
     lines = [
         'BEGIN:VEVENT',
-        f'UID:{_make_uid(date.isoformat(), idx)}',
+        f'UID:{_make_uid(date.isoformat(), task.title, time_start, occurrence)}',
         f'SUMMARY:{_escape(task.title)}',
         f'STATUS:{STATUS_MAP.get(task.status or "", "TENTATIVE")}',
         f'PRIORITY:{PRIORITY_MAP.get(task.priority or "", "0")}',
@@ -69,13 +94,12 @@ def _task_to_vevent_lines(task, date: datetime.date, idx: int) -> list[str]:
     return lines
 
 
-def _collect_vevent_lines(nodes: list, date: datetime.date, counter: list) -> list[list[str]]:
+def _collect_vevent_lines(nodes: list, date: datetime.date, seen: dict) -> list[list[str]]:
     events = []
     for node in nodes:
         if isinstance(node, TaskBlock):
-            events.append(_task_to_vevent_lines(node.task, date, counter[0]))
-            counter[0] += 1
-            events.extend(_collect_vevent_lines(node.nodes, date, counter))
+            events.append(_task_to_vevent_lines(node.task, date, seen))
+            events.extend(_collect_vevent_lines(node.nodes, date, seen))
     return events
 
 
@@ -90,7 +114,7 @@ def _build_ics(all_events: list[list[str]]) -> str:
     for event_lines in all_events:
         lines.extend(event_lines)
     lines.append('END:VCALENDAR')
-    return '\r\n'.join(lines) + '\r\n'
+    return '\r\n'.join(_fold_line(l) for l in lines) + '\r\n'
 
 
 class IcsTool:
@@ -101,11 +125,11 @@ class IcsTool:
 
         files = FileFinder.find_journal_files(journal_dir, date_from=date_from, date_to=date_to)
         all_events = []
-        counter = [0]
+        seen: dict = {}
         for file_path in files:
             date = FileFinder.get_journal_file_date(file_path)
             nodes = parse(file_path)
-            all_events.extend(_collect_vevent_lines(nodes, date, counter))
+            all_events.extend(_collect_vevent_lines(nodes, date, seen))
 
         with open(output_path, 'w', encoding='utf-8', newline='') as f:
             f.write(_build_ics(all_events))
