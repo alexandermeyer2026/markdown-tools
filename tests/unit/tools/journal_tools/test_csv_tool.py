@@ -10,9 +10,9 @@ from unittest.mock import patch
 from models.file import RawLine, TaskBlock, parse, parse_lines, serialize
 from models import Task, TaskTime
 from tools.journal_tools.cli_utils import parse_date_flags
-from tools.journal_tools.notion_tool import (
+from tools.journal_tools.csv_tool import (
     CSV_FIELDNAMES,
-    NotionTool,
+    CsvTool,
     _collect_rows,
     _count_task_runs,
     _replace_task_runs,
@@ -430,24 +430,24 @@ class TestParseDateFlags(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# NotionTool.export
+# CsvTool.export
 # ---------------------------------------------------------------------------
 
-class TestNotionToolExport(unittest.TestCase):
+class TestCsvToolExport(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
     def test_writes_csv_with_correct_headers(self):
         _write_journal(self.tmp, '2026-06-21', '- [ ] Task A\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(list(rows[0].keys()), CSV_FIELDNAMES)
 
     def test_exports_task_title_and_status(self):
         _write_journal(self.tmp, '2026-06-21', '- [x] Done task\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(rows[0]['Title'], 'Done task')
         self.assertEqual(rows[0]['Status'], 'done')
@@ -455,7 +455,7 @@ class TestNotionToolExport(unittest.TestCase):
     def test_exports_date_from_filename(self):
         _write_journal(self.tmp, '2026-06-10', '- [ ] Task\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(rows[0]['Date'], '2026-06-10')
 
@@ -463,7 +463,7 @@ class TestNotionToolExport(unittest.TestCase):
         _write_journal(self.tmp, '2026-06-10', '- [ ] A\n')
         _write_journal(self.tmp, '2026-06-11', '- [ ] B\n- [ ] C\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(len(rows), 3)
 
@@ -471,7 +471,7 @@ class TestNotionToolExport(unittest.TestCase):
         content = '- [ ] Parent\n  - [ ] Child\n'
         _write_journal(self.tmp, '2026-06-21', content)
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(rows[0]['Title'], 'Parent')
         self.assertEqual(rows[0]['Depth'], '0')
@@ -481,7 +481,7 @@ class TestNotionToolExport(unittest.TestCase):
     def test_exports_task_with_time(self):
         _write_journal(self.tmp, '2026-06-21', '- [ ] 9:00-10:00 Meeting\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(rows[0]['Time Start'], '9:00')
         self.assertEqual(rows[0]['Time End'], '10:00')
@@ -489,7 +489,7 @@ class TestNotionToolExport(unittest.TestCase):
     def test_exports_task_with_priority(self):
         _write_journal(self.tmp, '2026-06-21', '- [ ] !!! Urgent\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(rows[0]['Priority'], '!!!')
 
@@ -497,15 +497,15 @@ class TestNotionToolExport(unittest.TestCase):
         content = '# Heading\n\n- [ ] Task\n'
         _write_journal(self.tmp, '2026-06-21', content)
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(len(rows), 1)
 
     def test_default_output_filename(self):
         _write_journal(self.tmp, '2026-06-21', '- [ ] Task\n')
-        default_out = os.path.join(os.getcwd(), 'notion_export.csv')
+        default_out = os.path.join(os.getcwd(), 'journal_export.csv')
         try:
-            NotionTool.export([], self.tmp)
+            CsvTool.export([], self.tmp)
             self.assertTrue(os.path.exists(default_out))
         finally:
             if os.path.exists(default_out):
@@ -515,7 +515,7 @@ class TestNotionToolExport(unittest.TestCase):
         _write_journal(self.tmp, '2026-06-10', '- [ ] Old\n')
         _write_journal(self.tmp, '2026-06-21', '- [ ] New\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out, '--from', '2026-06-15'], self.tmp)
+        CsvTool.export([out, '--from', '2026-06-15'], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['Title'], 'New')
@@ -524,7 +524,7 @@ class TestNotionToolExport(unittest.TestCase):
         _write_journal(self.tmp, '2026-06-10', '- [ ] Old\n')
         _write_journal(self.tmp, '2026-06-21', '- [ ] New\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out, '--to', '2026-06-15'], self.tmp)
+        CsvTool.export([out, '--to', '2026-06-15'], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['Title'], 'Old')
@@ -534,14 +534,14 @@ class TestNotionToolExport(unittest.TestCase):
         _write_journal(self.tmp, '2026-06-10', '- [ ] B\n')
         _write_journal(self.tmp, '2026-06-21', '- [ ] C\n')
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out, '--from', '2026-06-05', '--to', '2026-06-15'], self.tmp)
+        CsvTool.export([out, '--from', '2026-06-05', '--to', '2026-06-15'], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['Title'], 'B')
 
     def test_empty_directory_writes_header_only(self):
         out = os.path.join(self.tmp, 'out.csv')
-        NotionTool.export([out], self.tmp)
+        CsvTool.export([out], self.tmp)
         rows = _read_csv(out)
         self.assertEqual(rows, [])
 
@@ -549,17 +549,17 @@ class TestNotionToolExport(unittest.TestCase):
         _write_journal(self.tmp, '2026-06-21', '- [ ] A\n- [ ] B\n')
         out = os.path.join(self.tmp, 'out.csv')
         with patch('builtins.print') as mock_print:
-            NotionTool.export([out], self.tmp)
+            CsvTool.export([out], self.tmp)
         output = ' '.join(str(c) for c in mock_print.call_args[0])
         self.assertIn('2', output)
         self.assertIn('1', output)
 
 
 # ---------------------------------------------------------------------------
-# NotionTool.import_
+# CsvTool.import_
 # ---------------------------------------------------------------------------
 
-class TestNotionToolImport(unittest.TestCase):
+class TestCsvToolImport(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
@@ -571,7 +571,7 @@ class TestNotionToolImport(unittest.TestCase):
 
     def test_no_args_exits(self):
         with self.assertRaises(SystemExit):
-            NotionTool.import_([], self.tmp)
+            CsvTool.import_([], self.tmp)
 
     def test_abort_does_not_modify_file(self):
         original = '- [ ] Original\n'
@@ -581,7 +581,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with self._abort():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         content = Path(self.tmp, '2026-06-21.md').read_text()
         self.assertEqual(content, original)
 
@@ -592,7 +592,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with self._confirm():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         content = Path(self.tmp, '2026-06-21.md').read_text()
         self.assertIn('New task', content)
         self.assertNotIn('Old task', content)
@@ -604,7 +604,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with self._confirm():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         content = Path(self.tmp, '2026-06-21.md').read_text()
         self.assertIn('# Heading', content)
 
@@ -617,7 +617,7 @@ class TestNotionToolImport(unittest.TestCase):
              'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '1'},
         ])
         with self._confirm():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         content = Path(self.tmp, '2026-06-21.md').read_text()
         lines = content.splitlines()
         child_line = next(l for l in lines if 'Child' in l)
@@ -629,7 +629,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with patch('builtins.print') as mock_print:
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         printed = ' '.join(str(c[0][0]) for c in mock_print.call_args_list)
         self.assertIn('No matching', printed)
 
@@ -642,7 +642,7 @@ class TestNotionToolImport(unittest.TestCase):
              'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0'},
         ])
         with self._confirm(), patch('builtins.print') as mock_print:
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         printed = ' '.join(str(c[0][0]) for c in mock_print.call_args_list)
         self.assertIn('Warning', printed)
         self.assertIn('2099-01-01', printed)
@@ -654,7 +654,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with self._confirm():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         backups = list(Path(self.tmp, '.backups').glob('*2026-06-21.md'))
         self.assertEqual(len(backups), 1)
 
@@ -668,7 +668,7 @@ class TestNotionToolImport(unittest.TestCase):
              'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0'},
         ])
         with self._confirm():
-            NotionTool.import_([csv_path, '--from', '2026-06-15'], self.tmp)
+            CsvTool.import_([csv_path, '--from', '2026-06-15'], self.tmp)
         self.assertIn('Old', Path(self.tmp, '2026-06-10.md').read_text())
         self.assertIn('Recent changed', Path(self.tmp, '2026-06-21.md').read_text())
 
@@ -682,7 +682,7 @@ class TestNotionToolImport(unittest.TestCase):
              'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0'},
         ])
         with self._confirm():
-            NotionTool.import_([csv_path, '--to', '2026-06-15'], self.tmp)
+            CsvTool.import_([csv_path, '--to', '2026-06-15'], self.tmp)
         self.assertIn('Old changed', Path(self.tmp, '2026-06-10.md').read_text())
         self.assertIn('Recent', Path(self.tmp, '2026-06-21.md').read_text())
         self.assertNotIn('Recent changed', Path(self.tmp, '2026-06-21.md').read_text())
@@ -691,9 +691,9 @@ class TestNotionToolImport(unittest.TestCase):
         original = '- [x] 9:00-10:00 ! Morning standup\n- [ ] Write report\n'
         _write_journal(self.tmp, '2026-06-21', original)
         csv_path = os.path.join(self.tmp, 'export.csv')
-        NotionTool.export([csv_path], self.tmp)
+        CsvTool.export([csv_path], self.tmp)
         with self._confirm():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         result = Path(self.tmp, '2026-06-21.md').read_text()
         self.assertIn('Morning standup', result)
         self.assertIn('Write report', result)
@@ -705,7 +705,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with self._confirm(), patch('builtins.print'):
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         self.assertIn('New', Path(self.tmp, '2026-06-21.md').read_text())
 
     def test_multi_section_file_prints_warning(self):
@@ -715,7 +715,7 @@ class TestNotionToolImport(unittest.TestCase):
             'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0',
         }])
         with self._confirm(), patch('builtins.print') as mock_print:
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         printed = ' '.join(str(c[0][0]) for c in mock_print.call_args_list)
         self.assertIn('Warning', printed)
         self.assertIn('2026-06-21', printed)
@@ -730,6 +730,6 @@ class TestNotionToolImport(unittest.TestCase):
              'Time Start': '', 'Time End': '', 'Priority': '', 'Tags': '', 'Depth': '0'},
         ])
         with self._confirm():
-            NotionTool.import_([csv_path], self.tmp)
+            CsvTool.import_([csv_path], self.tmp)
         self.assertIn('A new', Path(self.tmp, '2026-06-10.md').read_text())
         self.assertIn('B new', Path(self.tmp, '2026-06-21.md').read_text())

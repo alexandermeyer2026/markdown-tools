@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from os_utils import FileFinder, resolve_date
-from tools.journal_tools import CatchUpTool, DashboardTool, IcsTool, NotionTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool
+from tools.journal_tools import CatchUpTool, CsvTool, DashboardTool, IcsTool, PlannerTool, SyncTool, TimeMachineTool, TimelineTool
 
 
 def _open_journal_for_date(date_string: str, directory: str) -> None:
@@ -42,8 +42,8 @@ def main():
         'dashboard': lambda a: DashboardTool.run(a, journal_dir, journal_home),
         'sync':         lambda a: SyncTool.run(a, journal_dir),
         'time-machine': lambda a: TimeMachineTool.run(a, journal_dir),
-        'notion-export': lambda a: NotionTool.export(a, journal_dir),
-        'notion-import': lambda a: NotionTool.import_(a, journal_dir),
+        'csv-export': lambda a: CsvTool.export(a, journal_dir),
+        'csv-import': lambda a: CsvTool.import_(a, journal_dir),
         'ics-export':    lambda a: IcsTool.export(a, journal_dir),
     }
 

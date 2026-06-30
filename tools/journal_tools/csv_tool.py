@@ -105,11 +105,11 @@ def _replace_task_runs(original_nodes: list, new_task_nodes: list) -> list:
     return result
 
 
-class NotionTool:
+class CsvTool:
     @staticmethod
     def export(args: list[str], journal_dir: str) -> None:
         positional, date_from, date_to = parse_date_flags(args)
-        output_path = positional[0] if positional else 'notion_export.csv'
+        output_path = positional[0] if positional else 'journal_export.csv'
 
         files = FileFinder.find_journal_files(journal_dir, date_from=date_from, date_to=date_to)
         rows = []
@@ -129,7 +129,7 @@ class NotionTool:
     def import_(args: list[str], journal_dir: str) -> None:
         positional, date_from, date_to = parse_date_flags(args)
         if not positional:
-            print("Usage: journal notion-import <input.csv> [--from DATE] [--to DATE]")
+            print("Usage: journal csv-import <input.csv> [--from DATE] [--to DATE]")
             sys.exit(1)
 
         input_path = positional[0]

@@ -83,8 +83,8 @@ Tools are designed to work independently:
 | `journal dashboard` | Dashboard overview of open and upcoming tasks |
 | `journal time-machine <file>` | Browse and restore previous versions of a file |
 | `journal sync` | Push and pull files to a self-hosted server |
-| `journal notion-export` | Export journal entries to Notion |
-| `journal notion-import` | Import entries from Notion |
+| `journal csv-export` | Export tasks to a CSV file |
+| `journal csv-import` | Import tasks from a CSV file |
 | `journal ics-export` | Export tasks as an ICS calendar file |
 
 ## Project Structure
