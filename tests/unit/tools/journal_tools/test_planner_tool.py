@@ -10,7 +10,7 @@ from models import Task
 from models.file import RawLine, TaskBlock, serialize
 from tools.journal_tools.planner import DayCache
 from tools.journal_tools.planner.state import PlannerState
-from tools.journal_tools.planner.weekly import cache_has_changes
+from tools.journal_tools.planner.weekly import cache_has_changes, save_cache
 from models.file import TaskBlock
 
 
@@ -61,6 +61,30 @@ class TestWeekCacheChanges(unittest.TestCase):
         new_block = TaskBlock.from_task(Task(title='New', status='todo', time=None, line_number=-1, indent=''))
         day.add_block(new_block)
         self.assertEqual(serialize(day.nodes), '- [ ] Existing\n\n- [ ] New\n')
+
+
+class TestSaveCache(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_transit_day_does_not_create_file(self):
+        task = Task(title='Errand', status='todo', time=None, line_number=1, indent='')
+        block = TaskBlock.from_task(task)
+
+        transit = DayCache(file_path=None, nodes=[])
+        transit.add_block(block)
+        transit.remove_block(block)
+
+        self.assertTrue(transit.has_changes)
+        self.assertEqual(transit.nodes, [])
+
+        save_cache({'2024-01-03': transit}, self.tmpdir)
+
+        self.assertEqual(os.listdir(self.tmpdir), [])
 
 
 class TestPlannerState(unittest.TestCase):

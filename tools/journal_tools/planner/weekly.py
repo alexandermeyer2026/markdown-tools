@@ -42,6 +42,8 @@ def save_cache(cache: dict, directory: str) -> None:
         if not day.has_changes:
             continue
         if day.file_path is None:
+            if not day.nodes:
+                continue
             day.file_path = os.path.join(directory, f"{key}.md")
         if os.path.exists(day.file_path):
             BackupManager.backup(day.file_path, directory)
