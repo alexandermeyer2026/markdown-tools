@@ -9,7 +9,7 @@ from models import get_minutes
 from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_COLORS, GRAY, WHITE, RESET,
     get_time_slot, scale_lines, body_rows, subtask_rows,
-    insert_now_marker, ansi_truncate,
+    insert_now_marker, ansi_truncate, ansi_priority,
 )
 
 _STEP_SIZES = [0.25, 0.5, 1]
@@ -81,7 +81,7 @@ class TimelineTool:
 
         line += ' ' + STATUS_ICONS.get(task.status, '?')
         line += ' ' + task.time.to_str()
-        line += ' \033[1m' + task.title + '\033[0m'
+        line += ' ' + ansi_priority(task.priority) + '\033[1m' + task.title + '\033[0m'
         line = line[first_task_slot:]
 
         return line

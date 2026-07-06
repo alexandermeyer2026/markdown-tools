@@ -11,7 +11,7 @@ from rich.console import Group
 
 from models.file import TaskBlock
 from os_utils import FileWriter
-from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES, ansi_truncate
+from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES, append_priority, ansi_truncate
 from models import get_minutes
 from tools.journal_tools.planner.state import PlannerState
 
@@ -139,7 +139,9 @@ class DayEntry(Widget, can_focus=True):
                 style = STATUS_STYLES.get(task.status, "bright_black")
                 t = Text("  ")
                 t.append(icon, style=style)
-                t.append(f"  {task.time.to_str()}  {task.title}")
+                t.append(f"  {task.time.to_str()}  ")
+                append_priority(t, task.priority)
+                t.append(task.title)
                 yield TaskRowWidget(t)
                 if not self.collapsed:
                     yield from self._subtask_statics(block)
@@ -150,7 +152,9 @@ class DayEntry(Widget, can_focus=True):
             style = STATUS_STYLES.get(task.status, "bright_black")
             t = Text("  ")
             t.append(icon, style=style)
-            t.append(f"  {task.title}")
+            t.append("  ")
+            append_priority(t, task.priority)
+            t.append(task.title)
             yield TaskRowWidget(t)
             if not self.collapsed:
                 yield from self._subtask_statics(block)
@@ -162,7 +166,9 @@ class DayEntry(Widget, can_focus=True):
             style = STATUS_STYLES.get(child.status, "bright_black")
             t = Text(f"  {'  ' * depth}")
             t.append(icon, style=style)
-            t.append(f"  {child.title}")
+            t.append("  ")
+            append_priority(t, child.priority)
+            t.append(child.title)
             yield TaskRowWidget(t)
             yield from self._subtask_statics(child_block, depth + 1)
 

@@ -2,6 +2,8 @@ import math
 import re
 import textwrap
 
+from rich.text import Text
+
 from models import Task, get_minutes, minutes_to_time
 from models.file import RawLine, TaskBlock
 
@@ -22,6 +24,14 @@ STATUS_STYLES: dict[str, str] = {
     'started':     'yellow',
 }
 
+# Priority markers (!, !!, !!!) rendered before the title — high is red, medium
+# yellow, low green. Keyed by the raw marker so lookups mirror the file text.
+PRIORITY_STYLES: dict[str, str] = {
+    '!!!': 'red',
+    '!!':  'yellow',
+    '!':   'green',
+}
+
 # ANSI constants — used by non-Textual tools (catch_up, timeline, update)
 STATUS_COLORS: dict[str, str] = {
     'todo':        '\x1b[90m',
@@ -36,7 +46,27 @@ GRAY   = '\x1b[90m'
 WHITE  = '\x1b[97m'
 RED    = '\x1b[31m'
 GREEN  = '\x1b[32m'
+YELLOW = '\x1b[33m'
 RESET  = '\x1b[0m'
+
+PRIORITY_COLORS: dict[str, str] = {
+    '!!!': RED,
+    '!!':  YELLOW,
+    '!':   GREEN,
+}
+
+
+def append_priority(text: Text, priority: str | None) -> None:
+    """Append the colored priority marker (e.g. red '!!! ') before a task title."""
+    if priority:
+        text.append(priority + ' ', style=PRIORITY_STYLES.get(priority, ''))
+
+
+def ansi_priority(priority: str | None) -> str:
+    """Return the colored priority marker (e.g. red '!!! '), or '' when unset."""
+    if not priority:
+        return ''
+    return PRIORITY_COLORS.get(priority, '') + priority + RESET + ' '
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
@@ -126,11 +156,12 @@ def subtask_rows(block: TaskBlock, left_pad: int = 0, depth: int = 1, selected_t
         child = child_block.task
         indent = ' ' * left_pad + '  ' * depth
         icon = STATUS_ICONS.get(child.status, '?')
+        pri = ansi_priority(child.priority)
         if child is selected_task:
-            rows.append(f"{indent[:-2]}\x1b[7m> {icon} {child.title}{RESET}")
+            rows.append(f"{indent[:-2]}\x1b[7m> {icon} {pri}\x1b[7m{child.title}{RESET}")
         else:
             status_color = STATUS_COLORS.get(child.status, GRAY)
-            rows.append(f"{indent}{status_color}{icon}{RESET} {child.title}")
+            rows.append(f"{indent}{status_color}{icon}{RESET} {pri}{child.title}")
         rows.extend(body_rows(child_block, left_pad, depth))
         rows.extend(subtask_rows(child_block, left_pad, depth + 1, selected_task))
     return rows

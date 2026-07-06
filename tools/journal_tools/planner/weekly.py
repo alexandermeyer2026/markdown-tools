@@ -12,7 +12,7 @@ from textual.widget import Widget
 from models import Task, TaskTime
 from models.file import parse, write_nodes
 from os_utils import BackupManager, FileFinder, FileWriter
-from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES
+from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES, append_priority
 from .state import DayCache, PlannerState, WeekState
 from .utils import week_expanded
 
@@ -259,10 +259,11 @@ class WeekGrid(Widget, can_focus=True):
     def _week_cell(self, task: Task, depth: int, col_width: int, is_selected: bool, is_in_sel: bool = False) -> Text:
         icon = STATUS_ICONS.get(task.status, "?")
         style = STATUS_STYLES.get(task.status, "bright_black")
+        pri_width = len(task.priority) + 1 if task.priority else 0
 
         if depth > 0:
             indent = "  " * depth
-            title_max = max(col_width - 4 - depth * 2, 1)
+            title_max = max(col_width - 4 - depth * 2 - pri_width, 1)
             title_str = task.title[:title_max].ljust(title_max)
             t = Text("  ")
             if is_selected:
@@ -273,14 +274,16 @@ class WeekGrid(Widget, can_focus=True):
                 t.append(indent)
                 t.append(icon, style=style)
             t.append(" ")
+            append_priority(t, task.priority)
             t.append(title_str, style="reverse" if (is_selected or is_in_sel) else "")
             return t
 
-        title_max = col_width - 4
+        title_max = max(col_width - 4 - pri_width, 1)
         title_str = task.title[:title_max].ljust(title_max)
         t = Text("> " if is_selected else "  ")
         t.append(icon, style=style)
         t.append(" ")
+        append_priority(t, task.priority)
         t.append(title_str, style="reverse" if (is_selected or is_in_sel) else "")
         return t
 

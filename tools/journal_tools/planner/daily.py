@@ -14,7 +14,7 @@ from models import Task, TaskTime, get_minutes, minutes_to_time
 from models.file import RawLine, TaskBlock, write_nodes
 from os_utils import BackupManager
 from tools.journal_tools.rendering import (
-    STATUS_ICONS, STATUS_STYLES, get_time_slot, scale_lines,
+    STATUS_ICONS, STATUS_STYLES, append_priority, get_time_slot, scale_lines,
 )
 from .state import DayCache, PlannerState
 from .utils import flatten_tasks
@@ -229,6 +229,7 @@ class DayGrid(Widget, can_focus=True):
         t.append(f" {task.time.to_str()} ")
         t.append(icon, style=style)
         t.append(" ")
+        append_priority(t, task.priority)
         t.append(task.title[:title_max], style="bold reverse" if (is_sel or in_multi) else "bold")
         return t
 
@@ -241,6 +242,7 @@ class DayGrid(Widget, can_focus=True):
         t = Text("> " if is_sel else "  ")
         t.append(icon, style=style)
         t.append(" ")
+        append_priority(t, task.priority)
         t.append(task.title[:title_max], style="bold reverse" if (is_sel or in_multi) else "bold")
         return t
 
@@ -275,16 +277,20 @@ class DayGrid(Widget, can_focus=True):
                 t.append("> ")
                 t.append(icon)
                 t.append(" ")
+                append_priority(t, child.priority)
                 t.append(child.title[:title_max], style="reverse")
             elif child_in_multi:
                 t.append(leading)
                 t.append(icon, style=STATUS_STYLES.get(child.status, "bright_black"))
                 t.append(" ")
+                append_priority(t, child.priority)
                 t.append(child.title[:title_max], style="reverse")
             else:
                 t.append(leading)
                 t.append(icon, style=STATUS_STYLES.get(child.status, "bright_black"))
-                t.append(f" {child.title[:title_max]}")
+                t.append(" ")
+                append_priority(t, child.priority)
+                t.append(child.title[:title_max])
             rows.append(t)
             rows.extend(self._body_rows(child_block, depth, time_offset))
             rows.extend(self._subtask_rows(child_block, selected, depth + 1, time_offset))
