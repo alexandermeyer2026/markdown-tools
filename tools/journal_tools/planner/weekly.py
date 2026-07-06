@@ -14,7 +14,7 @@ from models.file import parse, write_nodes
 from os_utils import BackupManager, FileFinder, FileWriter
 from tools.journal_tools.rendering import STATUS_ICONS, STATUS_STYLES, append_priority
 from .state import DayCache, PlannerState, WeekState
-from .utils import week_expanded
+from .utils import next_priority, week_expanded
 
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -135,6 +135,7 @@ class WeekGrid(Widget, can_focus=True):
         Binding("s",      "status_started",     show=False),
         Binding("d",      "status_done",        show=False),
         Binding("f",      "status_failed",      show=False),
+        Binding("exclamation_mark", "cycle_priority", show=False),
         Binding("tab",       "tab_task",       show=False),
         Binding("shift+tab", "shift_tab_task", show=False),
         Binding("J",         "move_down",       show=False),
@@ -249,7 +250,7 @@ class WeekGrid(Widget, can_focus=True):
         c_hint = "[c] expand" if self._collapsed else "[c] collapse"
         hints = (
             f"[h/j/k/l] navigate  [space] select  [H/L] move  [>] carry  "
-            f"[t/i/s/d/f] status  {c_hint}  [Enter] open/edit  [n] new  [ctrl+s] save  [ctrl+r] reload  [Esc] quit"
+            f"[t/i/s/d/f] status  [!] priority  {c_hint}  [Enter] open/edit  [n] new  [ctrl+s] save  [ctrl+r] reload  [Esc] quit"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -460,6 +461,13 @@ class WeekGrid(Widget, can_focus=True):
     def action_status_started(self)     -> None: self._set_status("started")
     def action_status_done(self)        -> None: self._set_status("done")
     def action_status_failed(self)      -> None: self._set_status("failed")
+
+    def action_cycle_priority(self) -> None:
+        for day_key, task in self._active_entries():
+            cache = self._planner.days.get(day_key)
+            if cache:
+                cache.set_priority(task, next_priority(task.priority))
+        self.refresh()
 
     def action_move_left(self) -> None:
         if self._multiselect:

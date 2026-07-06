@@ -17,7 +17,7 @@ from tools.journal_tools.rendering import (
     STATUS_ICONS, STATUS_STYLES, append_priority, get_time_slot, scale_lines,
 )
 from .state import DayCache, PlannerState
-from .utils import flatten_tasks
+from .utils import flatten_tasks, next_priority
 
 
 _STEP = 0.25          # hours per slot (15 min)
@@ -63,6 +63,7 @@ class DayGrid(Widget, can_focus=True):
         Binding("s",      "status_started",     show=False),
         Binding("d",      "status_done",        show=False),
         Binding("f",      "status_failed",      show=False),
+        Binding("exclamation_mark", "cycle_priority", show=False),
         Binding("tab",        "tab_task",       show=False),
         Binding("shift+tab",  "shift_tab_task", show=False),
         Binding("J",         "move_down",       show=False),
@@ -196,7 +197,7 @@ class DayGrid(Widget, can_focus=True):
         c_hint = "[c] expand" if self._collapsed else "[c] collapse"
         hints = (
             f"[j/k] move  [space] select  [h/l] shift  [H/L] end time  [r] remove time  "
-            f"[n] new  [Enter] edit  [t/i/s/d/f] status  {c_hint}  [ctrl+s] save  [ctrl+r] reload  [Esc] back"
+            f"[n] new  [Enter] edit  [t/i/s/d/f] status  [!] priority  {c_hint}  [ctrl+s] save  [ctrl+r] reload  [Esc] back"
         )
         lines.append(Text(_MARGIN + hints, style="bright_black"))
 
@@ -462,6 +463,12 @@ class DayGrid(Widget, can_focus=True):
     def action_status_started(self)     -> None: self._set_status("started")
     def action_status_done(self)        -> None: self._set_status("done")
     def action_status_failed(self)      -> None: self._set_status("failed")
+
+    def action_cycle_priority(self) -> None:
+        day = self._day()
+        for task in self._active_tasks():
+            day.set_priority(task, next_priority(task.priority))
+        self.refresh()
 
     # ── Hierarchy / reorder ───────────────────────────────────────────────────
 

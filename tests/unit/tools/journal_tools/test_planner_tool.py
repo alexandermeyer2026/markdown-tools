@@ -47,6 +47,21 @@ class TestWeekCacheChanges(unittest.TestCase):
         cache['2024-01-15'].set_status(child, 'done')
         self.assertTrue(cache_has_changes(cache))
 
+    def test_set_priority_change_detected(self):
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        parent_block = TaskBlock.from_task(parent)
+        cache = self._make_cache([parent_block])
+        cache['2024-01-15'].set_priority(parent, '!!')
+        self.assertTrue(cache_has_changes(cache))
+        self.assertEqual(serialize(cache['2024-01-15'].nodes), '- [ ] !! Parent\n')
+
+    def test_set_priority_none_is_noop(self):
+        parent = Task(title='Parent', status='todo', time=None, line_number=1, indent='')
+        parent_block = TaskBlock.from_task(parent)
+        cache = self._make_cache([parent_block])
+        cache['2024-01-15'].set_priority(parent, None)
+        self.assertFalse(cache_has_changes(cache))
+
     def test_add_block_no_separator_when_no_trailing_blank(self):
         existing = TaskBlock.from_task(Task(title='Existing', status='todo', time=None, line_number=1, indent=''))
         day = DayCache(file_path=None, nodes=[existing])
@@ -156,3 +171,16 @@ class TestPlannerState(unittest.TestCase):
         body_lines = [n.raw.rstrip('\n') for n in block_a.nodes if isinstance(n, RawLine)]
         body_str = textwrap.dedent('\n'.join(body_lines)).strip()
         self.assertEqual(body_str, 'Some notes')
+
+
+class TestNextPriority(unittest.TestCase):
+    def test_rotation_cycles_and_wraps(self):
+        from tools.journal_tools.planner.utils import next_priority
+        self.assertEqual(next_priority(None), '!')
+        self.assertEqual(next_priority('!'), '!!')
+        self.assertEqual(next_priority('!!'), '!!!')
+        self.assertEqual(next_priority('!!!'), None)
+
+    def test_unknown_value_restarts_cycle(self):
+        from tools.journal_tools.planner.utils import next_priority
+        self.assertEqual(next_priority('bogus'), '!')

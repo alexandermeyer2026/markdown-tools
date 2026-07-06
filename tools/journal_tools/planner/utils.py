@@ -1,6 +1,15 @@
 from models import Task, get_minutes
 from models.file import TaskBlock
 
+# Rotation order for the "!" keybind: none → ! → !! → !!! → none.
+PRIORITY_CYCLE: list = [None, "!", "!!", "!!!"]
+
+
+def next_priority(current) -> str | None:
+    """Return the next priority in the rotation, wrapping !!! back to none."""
+    idx = PRIORITY_CYCLE.index(current) if current in PRIORITY_CYCLE else 0
+    return PRIORITY_CYCLE[(idx + 1) % len(PRIORITY_CYCLE)]
+
 
 def flatten_tasks(blocks: list) -> list[Task]:
     """Return all Tasks in document order (DFS) from a list of TaskBlocks."""

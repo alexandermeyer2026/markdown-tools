@@ -81,6 +81,15 @@ class DayCache:
         block.set_status(status)
         self._bump()
 
+    def set_priority(self, task, priority) -> None:
+        if task.priority == priority:
+            return
+        block = self.find_block(task)
+        if block is None:
+            raise ValueError(f"Block not found for task {task.title!r} — task may not belong to this DayCache")
+        block.set_priority(priority)
+        self._bump()
+
     def set_time(self, task, time) -> None:
         if task.time == time:
             return
