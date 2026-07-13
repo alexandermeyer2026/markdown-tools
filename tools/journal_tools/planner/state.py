@@ -15,10 +15,19 @@ from models.file import (
 )
 
 
+def _file_stamp(path) -> 'tuple[float, int] | None':
+    """Return (mtime, size) identifying a file's on-disk state, or None if absent."""
+    if not path or not os.path.exists(path):
+        return None
+    st = os.stat(path)
+    return (st.st_mtime, st.st_size)
+
+
 class DayCache:
-    def __init__(self, file_path, nodes):
+    def __init__(self, file_path, nodes, stamp=None):
         self.file_path = file_path
         self.nodes = nodes
+        self.stamp = stamp  # (mtime, size) of file_path when last read/written
         self._version = 0
         self._saved_version = 0
         self._cp_nodes = None
@@ -31,6 +40,11 @@ class DayCache:
 
     def _bump(self) -> None:
         self._version += 1
+
+    def mark_saved(self) -> None:
+        """Record a successful write: sync the saved version and file stamp."""
+        self._saved_version = self._version
+        self.stamp = _file_stamp(self.file_path)
 
     @property
     def task_list(self) -> list:
@@ -68,6 +82,7 @@ class DayCache:
             self.nodes = parse(self.file_path)
         else:
             self.nodes = []
+        self.stamp = _file_stamp(self.file_path)
         self._version = self._saved_version
 
     # ── Mutation API ──────────────────────────────────────────────────────────
@@ -180,11 +195,14 @@ class PlannerState:
 
     def load_day(self, day: datetime.date) -> DayCache:
         key = day.isoformat()
+        files = FileFinder.find_journal_files(
+            self.directory, date_from=day, date_to=day
+        )
+        fp = files[0] if files else None
         if key not in self._days:
-            files = FileFinder.find_journal_files(
-                self.directory, date_from=day, date_to=day
-            )
-            self._load_into_state(key, files[0] if files else None)
+            self._load_into_state(key, fp)
+        else:
+            self._refresh_if_stale(key, fp)
         return self._days[key]
 
     def load_file(self, file_path: str, date: datetime.date | None = None) -> tuple[str, DayCache]:
@@ -197,6 +215,8 @@ class PlannerState:
                 key = file_path
         if key not in self._days:
             self._load_into_state(key, file_path)
+        else:
+            self._refresh_if_stale(key, file_path)
         return key, self._days[key]
 
     def reload_day_by_key(self, key: str, new_file_path: str | None = None) -> None:
@@ -206,12 +226,28 @@ class PlannerState:
         )
         self._load_into_state(key, fp)
 
+    def _refresh_if_stale(self, key: str, file_path: str | None) -> None:
+        """Re-read a cached day from disk when it holds no unsaved edits and the
+        file changed underneath it (or a file now exists where none did).
+
+        Days with in-memory changes are left untouched so edits are never
+        silently discarded — the dashboard/week/day views share one cache, and
+        only this refresh keeps a clean day from overwriting a newer file on save.
+        """
+        day = self._days.get(key)
+        if day is None or day.has_changes:
+            return
+        if file_path != day.file_path or _file_stamp(file_path) != day.stamp:
+            self._load_into_state(key, file_path)
+
     def _load_into_state(self, key: str, file_path: str | None) -> None:
         if file_path and os.path.exists(file_path):
             nodes = parse(file_path)
         else:
             nodes = []
-        self._days[key] = DayCache(file_path=file_path, nodes=nodes)
+        self._days[key] = DayCache(
+            file_path=file_path, nodes=nodes, stamp=_file_stamp(file_path)
+        )
 
 
 class WeekState:

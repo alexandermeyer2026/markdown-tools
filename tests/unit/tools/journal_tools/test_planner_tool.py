@@ -163,6 +163,46 @@ class TestPlannerState(unittest.TestCase):
         self.assertGreater(len(state.days[key].task_list), n_before)
         self.assertFalse(state.days[key].has_changes)
 
+    def test_reopen_refreshes_clean_day_from_disk(self):
+        """A cached day with no unsaved edits must reflect the current file when
+        reopened — the dashboard/week/day views share one cache, so a stale clean
+        snapshot would otherwise overwrite a newer file (heading loss) on save."""
+        state = PlannerState(self.tmpdir)
+        state.load_day(self.date)  # caches a clean snapshot
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("# Heading\n\n- [ ] Task A\n- [x] Task B\n- [ ] Task C\n")
+        day = state.load_day(self.date)  # reopen → refresh from disk
+        self.assertIn('Task C', [b.task.title for b in day.task_list])
+        self.assertEqual(serialize(day.nodes).splitlines()[0], '# Heading')
+
+    def test_reopen_preserves_unsaved_edits_over_disk_change(self):
+        """A cached day WITH unsaved edits is never refreshed — edits must not be
+        silently discarded even if the file changed underneath."""
+        state = PlannerState(self.tmpdir)
+        key = self.date.isoformat()
+        state.load_day(self.date)
+        ephemeral = Task(title='Ephemeral', status='todo', time=None, line_number=-1, indent='')
+        state.days[key].add_block(TaskBlock.from_task(ephemeral))  # unsaved edit
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write("- [ ] Totally different\n")
+        day = state.load_day(self.date)
+        self.assertIn('Ephemeral', [b.task.title for b in day.task_list])
+        self.assertTrue(day.has_changes)
+
+    def test_reopen_adopts_file_created_after_empty_cache(self):
+        """A day first cached as empty (no file) must adopt a file created later,
+        e.g. the week view caches a missing day before it exists on disk."""
+        state = PlannerState(self.tmpdir)
+        future = datetime.date(2024, 3, 16)
+        day1 = state.load_day(future)
+        self.assertIsNone(day1.file_path)
+        newpath = os.path.join(self.tmpdir, '2024-03-16.md')
+        with open(newpath, 'w', encoding='utf-8') as f:
+            f.write("# New Day\n\n- [ ] Fresh task\n")
+        day2 = state.load_day(future)
+        self.assertEqual(day2.file_path, newpath)
+        self.assertEqual([b.task.title for b in day2.task_list], ['Fresh task'])
+
     def test_task_body_dedented_on_load(self):
         import textwrap
         state = PlannerState(self.tmpdir)

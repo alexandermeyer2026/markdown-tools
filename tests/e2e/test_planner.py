@@ -153,6 +153,34 @@ def test_week_add_task_then_move_cross_week(run_planner_scenario):
     run_planner_scenario(run, "week/add_task_then_move_cross_week", week_today="2024-01-07")
 
 
+def test_week_to_day_refreshes_stale_file(run_planner_scenario):
+    """Enter week view (caches the day), change the file on disk underneath, then
+    open the day and save. The day view must refresh from disk rather than
+    overwrite it with the stale cached snapshot (dashboard/week/day share one
+    cache). Regression test for headings/content vanishing when planning.
+    """
+    async def run(pilot, app):
+        # Week view has cached Tuesday's file. Simulate an external / other-view
+        # edit: add a task on disk after the cache snapshot was taken.
+        tuesday = os.path.join(app.directory, "2024-01-02.md")
+        with open(tuesday, "w", encoding="utf-8") as f:
+            f.write(
+                "# Tuesday\n\n"
+                "- [ ] 09:00 Morning standup\n"
+                "- [ ] Write report\n"
+                "- [ ] Review PRs\n"
+                "- [ ] Added externally\n"
+            )
+
+        await pilot.press("k")        # cursor row 0 → -1 (day header)
+        await pilot.press("enter")    # open Tuesday's day view
+        await pilot.pause()
+        await pilot.press("d")        # mark 09:00 Morning standup done
+        await _save(pilot, app)       # ctrl+s → confirm
+
+    run_planner_scenario(run, "week/stale_cache_refresh", week_today="2024-01-02")
+
+
 def test_week_carry_forward(run_planner_scenario):
     """Weekly view: carry unfinished subtasks to next day; finished subtask stays in source."""
     async def run(pilot, app):

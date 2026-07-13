@@ -33,7 +33,7 @@ def save(day: DayCache, directory: str) -> None:
     if os.path.exists(day.file_path):
         BackupManager.backup(day.file_path, directory)
     write_nodes(day.file_path, day.nodes)
-    day._saved_version = day._version
+    day.mark_saved()
 
 
 class DayGrid(Widget, can_focus=True):
