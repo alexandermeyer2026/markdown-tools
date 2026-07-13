@@ -42,7 +42,7 @@ cd webapp/frontend && npm install && cd ../..
 **4. Start the stack**
 ```sh
 cd webapp
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+docker compose up --build
 ```
 
 Open [http://localhost:8080](http://localhost:8080) and log in with your password.
@@ -51,7 +51,13 @@ Open [http://localhost:8080](http://localhost:8080) and log in with your passwor
 
 ## Server deployment
 
-**Requirements:** A VPS with Docker and Docker Compose installed, a domain pointed at the server, ports 80 and 443 open.
+The webapp serves **plain HTTP on a single port** (default `127.0.0.1:8080`,
+override with `WEBAPP_PORT`). It does not terminate TLS itself. Run it directly,
+or — for HTTPS — put a reverse proxy of your choice in front.
+
+**Requirements:** A host with Docker and Docker Compose installed. For a public
+HTTPS deployment you'll also want a domain pointed at the server and a reverse
+proxy holding the certificate.
 
 **1. Clone the repo on the server**
 ```sh
@@ -80,16 +86,16 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 **3. Run the deploy script**
 ```sh
 chmod +x webapp/scripts/deploy.sh
-./webapp/scripts/deploy.sh yourdomain.com you@email.com
+./webapp/scripts/deploy.sh yourdomain.com
 ```
 
 The script will:
-- Substitute your domain into the nginx config
-- Obtain an SSL certificate via certbot (needs port 80 free)
 - Build and start all containers
-- Set up automatic certificate renewal via cron
 
-Your app will be live at `https://yourdomain.com`.
+The app is now serving HTTP on `${WEBAPP_PORT:-127.0.0.1:8080}` (loopback by
+default, so it isn't publicly exposed). Point your reverse proxy at it and let
+the proxy handle TLS for `yourdomain.com`. To expose the app directly instead,
+set `WEBAPP_PORT` to a public bind such as `0.0.0.0:8080`.
 
 ---
 
@@ -114,8 +120,7 @@ webapp/
 ├── frontend/       React 18 + TypeScript — mobile-first UI
 ├── nginx/          nginx config + frontend Dockerfile
 ├── scripts/        deploy.sh for first-time server setup
-├── docker-compose.yml        production
-└── docker-compose.local.yml  local overrides (HTTP, port 8080)
+└── docker-compose.yml        HTTP on ${WEBAPP_PORT:-127.0.0.1:8080}
 ```
 
 The backend imports the CLI's `TaskParser`, `Task`, and `BackupManager` directly — no separate data model. Files are stored as plain `.md` in `JOURNAL_DIR`, and every write is backed up automatically to `JOURNAL_DIR/.backups/`.

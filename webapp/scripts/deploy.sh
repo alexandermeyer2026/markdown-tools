@@ -1,22 +1,22 @@
 #!/bin/sh
-# First-time deploy script.
-# Run this once on the VPS after cloning the repo.
+# First-time deploy for the standalone webapp stack.
+# Run this once on the host after cloning the repo.
 #
-# Usage: ./scripts/deploy.sh <domain> <email>
-# Example: ./scripts/deploy.sh journal.example.com me@example.com
+# The webapp serves plain HTTP on a port (default 127.0.0.1:8080, override with
+# WEBAPP_PORT). It does NOT terminate TLS — put a reverse proxy of your choice
+# in front for HTTPS, or access it directly.
+#
+# Usage: ./scripts/deploy.sh <domain>
+# Example: ./scripts/deploy.sh journal.example.com
 
 set -e
 
-DOMAIN=${1:?Usage: ./scripts/deploy.sh <domain> <email>}
-EMAIL=${2:?Usage: ./scripts/deploy.sh <domain> <email>}
+DOMAIN=${1:?Usage: ./scripts/deploy.sh <domain>}
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-# ── 1. Generate nginx config from template ────────────────────────────────────
-sed "s/YOUR_DOMAIN/$DOMAIN/g" nginx/nginx.conf.template > nginx/nginx.conf
-
-# ── 2. Generate backend .env from template ────────────────────────────────────
+# ── 1. Generate backend .env from template ────────────────────────────────────
 if [ ! -f backend/.env ]; then
   sed "s|https://yourdomain.com|https://$DOMAIN|g" backend/.env.example > backend/.env
   echo ""
@@ -28,25 +28,10 @@ if [ ! -f backend/.env ]; then
   exit 1
 fi
 
-# ── 3. Install certbot and obtain SSL certificate ─────────────────────────────
-if ! command -v certbot > /dev/null 2>&1; then
-  echo "Installing certbot..."
-  apt-get update -qq && apt-get install -y certbot
-fi
-
-echo "Obtaining SSL certificate for $DOMAIN..."
-certbot certonly --standalone \
-  --email "$EMAIL" \
-  --agree-tos --no-eff-email \
-  -d "$DOMAIN"
-
-# ── 4. Start the stack ────────────────────────────────────────────────────────
+# ── 2. Start the stack ────────────────────────────────────────────────────────
 echo "Starting services..."
 docker compose up -d --build
 
-# ── 5. Set up automatic cert renewal ─────────────────────────────────────────
-COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.yml"
-(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && docker compose -f $COMPOSE_FILE restart nginx") | crontab -
-
 echo ""
-echo "Done. App is live at https://$DOMAIN"
+echo "Done. Webapp is serving HTTP on ${WEBAPP_PORT:-127.0.0.1:8080}."
+echo "Put a reverse proxy in front for TLS (e.g. https://$DOMAIN)."

@@ -15,7 +15,6 @@ id_rsa
 id_ed25519
 .netrc
 *.bak
-webapp/nginx/nginx.conf
 graphify-out/
 local/
 .claude/settings*.json

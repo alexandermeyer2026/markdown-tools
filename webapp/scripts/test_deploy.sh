@@ -21,35 +21,27 @@ check() {
     fi
 }
 
-# ── First run (no .env) ───────────────────────────────────────────────────────
+# nginx.conf is a committed, static config (no generation step).
+check "nginx.conf present"                            "[ -f nginx/nginx.conf ]"
+check "nginx.conf terminates no TLS"                  "! grep -qi 'ssl_certificate' nginx/nginx.conf"
+
+# ── First run (no .env): deploy creates .env from template and stops ──────────
 echo "--- First run ---"
 rm -f backend/.env
-bash scripts/deploy.sh mydomain.com me@example.com || true
+bash scripts/deploy.sh mydomain.com || true
 
-check "first run: nginx.conf generated"               "[ -f nginx/nginx.conf ]"
-check "first run: nginx.conf has domain"              "grep -q 'mydomain.com' nginx/nginx.conf"
-check "first run: nginx.conf no leftover placeholder" "! grep -q 'YOUR_DOMAIN' nginx/nginx.conf"
 check "first run: backend/.env generated"             "[ -f backend/.env ]"
 check "first run: backend/.env has domain"            "grep -q 'https://mydomain.com' backend/.env"
-check "first run: nginx.conf.template untouched"      "grep -q 'YOUR_DOMAIN' nginx/nginx.conf.template"
 
-# ── Second run (.env exists, stubs for certbot/docker/crontab) ───────────────
+# ── Second run (.env exists, stub for docker): deploy proceeds to `up` ────────
 echo ""
 echo "--- Second run ---"
 mkdir -p bin
-printf '#!/bin/sh\necho "[stub] certbot $@"\n'       > bin/certbot  && chmod +x bin/certbot
 printf '#!/bin/sh\necho "[stub] docker $@"\n'        > bin/docker   && chmod +x bin/docker
-printf '#!/bin/sh\necho "[stub] crontab $@"\n'       > bin/crontab  && chmod +x bin/crontab
 PATH="$TMPDIR/repo/bin:$PATH"
 
-# Overwrite nginx.conf to confirm it gets regenerated
-echo "old" > nginx/nginx.conf
+bash scripts/deploy.sh mydomain.com
 
-bash scripts/deploy.sh mydomain.com me@example.com
-
-check "second run: nginx.conf regenerated"              "! grep -q 'old' nginx/nginx.conf"
-check "second run: nginx.conf has domain"               "grep -q 'mydomain.com' nginx/nginx.conf"
-check "second run: nginx.conf no leftover placeholder"  "! grep -q 'YOUR_DOMAIN' nginx/nginx.conf"
 check "second run: backend/.env unchanged"              "grep -q 'https://mydomain.com' backend/.env"
 
 echo ""
