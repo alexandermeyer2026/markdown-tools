@@ -9,6 +9,20 @@ Markdown is human-readable, version-controllable, and supported everywhere.
 This project provides tools that operate directly on `.md` files — so your data
 stays accessible and portable, independent of any specific application.
 
+## Screenshots
+
+**Dashboard** — overdue, today, and upcoming tasks at a glance, with a desk note board.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+**Weekly planner** — schedule tasks across the week.
+
+![Weekly planner](docs/screenshots/weekly-planner.png)
+
+**Daily planner** — time-block a single day.
+
+![Daily planner](docs/screenshots/daily-planner.png)
+
 ## Installation
 
 ### Requirements
